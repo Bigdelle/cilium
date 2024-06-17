@@ -356,9 +356,36 @@ static __always_inline int check_filters(struct __ctx_buff *ctx)
 	return bpf_xdp_exit(ctx, ret);
 }
 
+static __always_inline int set_trace_id(struct __ctx_buff *ctx, __u32 trace_id) {
+    void *data_meta = (void *)(long)ctx->data_meta;
+    void *data = (void *)(long)ctx->data;
+    int ret;
+
+    // Allocate space for 4 bytes (for a __u32 trace_id)
+    ret = bpf_xdp_adjust_meta(ctx, -(int)sizeof(__u32));
+    if (ret < 0)
+        return XDP_ABORTED;
+
+    // Ensure there is enough space for metadata
+    if ((data_meta + sizeof(__u32)) <= data) {
+        *(__u32 *)data_meta = trace_id;
+        return XDP_ABORTED; // Out of bounds, abort
+    }
+
+    return XDP_PASS;
+}
+
 __section_entry
 int cil_xdp_entry(struct __ctx_buff *ctx)
 {
+	__u32 trace_id = 0xDEADBEEF;
+	int ret;
+
+	ret = set_trace_id(ctx, trace_id);
+	if (ret != XDP_PASS){
+		return ret;
+	}
+
 	return check_filters(ctx);
 }
 
