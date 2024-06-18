@@ -362,7 +362,7 @@ static __always_inline int set_trace_id(struct __ctx_buff *ctx, __u32 trace_id) 
     int ret;
 
     // Allocate space for 4 bytes (for a __u32 trace_id)
-    ret = bpf_xdp_adjust_meta(ctx, -(int)sizeof(__u32));
+    ret = ctx_adjust_meta(ctx, -(int)sizeof(__u32));
     if (ret < 0)
         return XDP_ABORTED;
 

@@ -150,7 +150,7 @@ func (tn *TraceNotifyV1) decodeTraceNotifyVersion1(data []byte) error {
 		return err
 	}
 
-	copy(tn.OrigIP[:], data[32:48])
+	copy(tn.OrigIP[:], data[40:56])
 	return nil
 }
 
