@@ -1428,6 +1428,7 @@ int cil_from_container(struct __ctx_buff *ctx)
 
 	bpf_clear_meta(ctx);
 	reset_queue_mapping(ctx);
+	ctx_store_meta(ctx, CB_3, 0x12345678);
 
 	send_trace_notify(ctx, TRACE_FROM_LXC, sec_label, UNKNOWN_ID,
 			  TRACE_EP_ID_UNKNOWN, TRACE_IFINDEX_UNKNOWN,

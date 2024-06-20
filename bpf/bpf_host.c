@@ -1682,7 +1682,7 @@ int cil_to_host(struct __ctx_buff *ctx)
 #else
 	ret = CTX_ACT_OK;
 #endif /* ENABLE_HOST_FIREWALL */
-
+ctx_store_meta(ctx, CB_3, 0x12345678);
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, src_id, ret, ext_err,
