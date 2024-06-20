@@ -762,6 +762,9 @@ nodeport_dsr_ingress_ipv6(struct __ctx_buff *ctx, struct ipv6_ct_tuple *tuple,
 	ret = ct_lazy_lookup6(get_ct_map6(tuple), tuple, ctx, l4_off,
 			      CT_EGRESS, SCOPE_FORWARD, CT_ENTRY_DSR,
 			      NULL, &monitor);
+	if (ret < 0)
+		return ret;
+
 	switch (ret) {
 	case CT_NEW:
 create_ct:
@@ -770,8 +773,6 @@ create_ct:
 
 		ct_state_new.src_sec_id = WORLD_IPV6_ID;
 		ct_state_new.dsr_internal = 1;
-		ct_state_new.proxy_redirect = false;
-		ct_state_new.from_l7lb = false;
 
 		ret = ct_create6(get_ct_map6(tuple), NULL, tuple, ctx,
 				 CT_EGRESS, &ct_state_new, ext_err);
@@ -1282,8 +1283,7 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 
 		send_trace_notify(ctx, TRACE_TO_PROXY, src_sec_identity, UNKNOWN_ID,
 				  bpf_ntohs((__u16)svc->l7_lb_proxy_port),
-				  TRACE_IFINDEX_UNKNOWN,
-				  TRACE_REASON_POLICY, monitor);
+				  NATIVE_DEV_IFINDEX, TRACE_REASON_POLICY, monitor);
 		return ctx_redirect_to_proxy_hairpin_ipv6(ctx,
 							  (__be16)svc->l7_lb_proxy_port);
 	}
@@ -1316,6 +1316,9 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 		ret = ct_lazy_lookup6(get_ct_map6(tuple), tuple, ctx, l4_off,
 				      CT_EGRESS, SCOPE_FORWARD, CT_ENTRY_NODEPORT,
 				      &ct_state, &monitor);
+		if (ret < 0)
+			return ret;
+
 		switch (ret) {
 		case CT_NEW:
 			ct_state.src_sec_id = WORLD_IPV6_ID;
@@ -2295,6 +2298,9 @@ nodeport_dsr_ingress_ipv4(struct __ctx_buff *ctx, struct ipv4_ct_tuple *tuple,
 	ret = ct_lazy_lookup4(get_ct_map4(tuple), tuple, ctx, ipv4_is_fragment(ip4),
 			      l4_off, has_l4_header, CT_EGRESS, SCOPE_FORWARD,
 			      CT_ENTRY_DSR, NULL, &monitor);
+	if (ret < 0)
+		return ret;
+
 	switch (ret) {
 	case CT_NEW:
 create_ct:
@@ -2307,8 +2313,6 @@ create_ct:
 
 		ct_state_new.src_sec_id = WORLD_IPV4_ID;
 		ct_state_new.dsr_internal = 1;
-		ct_state_new.proxy_redirect = 0;
-		ct_state_new.from_l7lb = 0;
 
 		ret = ct_create4(get_ct_map4(tuple), NULL, tuple, ctx,
 				 CT_EGRESS, &ct_state_new, ext_err);
@@ -2799,8 +2803,7 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 
 		send_trace_notify(ctx, TRACE_TO_PROXY, src_sec_identity, UNKNOWN_ID,
 				  bpf_ntohs((__u16)svc->l7_lb_proxy_port),
-				  TRACE_IFINDEX_UNKNOWN,
-				  TRACE_REASON_POLICY, monitor);
+				  NATIVE_DEV_IFINDEX, TRACE_REASON_POLICY, monitor);
 		return ctx_redirect_to_proxy_hairpin_ipv4(ctx, ip4,
 							  (__be16)svc->l7_lb_proxy_port);
 	}
@@ -2858,6 +2861,9 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		ret = ct_lazy_lookup4(get_ct_map4(tuple), tuple, ctx, is_fragment,
 				      l4_off, has_l4_header, CT_EGRESS, SCOPE_FORWARD,
 				      CT_ENTRY_NODEPORT, &ct_state, &monitor);
+		if (ret < 0)
+			return ret;
+
 		switch (ret) {
 		case CT_NEW:
 			ct_state.src_sec_id = src_sec_identity;
