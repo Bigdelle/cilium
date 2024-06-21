@@ -1611,6 +1611,7 @@ drop_err:
 __section_entry
 int cil_to_host(struct __ctx_buff *ctx)
 {
+	__u32 trace_id;
 	__u32 magic = ctx_load_meta(ctx, CB_PROXY_MAGIC);
 	__u16 __maybe_unused proto = 0;
 	struct trace_ctx trace = {
@@ -1682,7 +1683,16 @@ int cil_to_host(struct __ctx_buff *ctx)
 #else
 	ret = CTX_ACT_OK;
 #endif /* ENABLE_HOST_FIREWALL */
-ctx_store_meta(ctx, CB_3, 0x12345678);
+//ctx_store_meta(ctx, CB_3, 0x12345678);
+trace_id = trace_id_from_ctx(ctx);
+ctx_store_meta(ctx, CB_3, trace_id);
+
+// Check if the trace ID is valid
+if (trace_id > 0) {
+    // Save the trace ID using ctx_load_meta function
+    ctx_store_meta(ctx, CB_3, trace_id);
+}
+
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, src_id, ret, ext_err,

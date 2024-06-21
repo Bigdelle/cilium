@@ -54,6 +54,7 @@
 #include "lib/fib.h"
 #include "lib/nodeport.h"
 #include "lib/policy_log.h"
+#include "lib/ip_options.h"
 
 /* Per-packet LB is needed if all LB cases can not be handled in bpf_sock.
  * Most services with L7 LB flag can not be redirected to their proxy port
@@ -1421,6 +1422,7 @@ int tail_handle_arp(struct __ctx_buff *ctx)
 __section_entry
 int cil_from_container(struct __ctx_buff *ctx)
 {
+	__u32 trace_id;
 	__u16 proto;
 	__u32 sec_label = SECLABEL;
 	__s8 ext_err = 0;
@@ -1428,7 +1430,14 @@ int cil_from_container(struct __ctx_buff *ctx)
 
 	bpf_clear_meta(ctx);
 	reset_queue_mapping(ctx);
-	ctx_store_meta(ctx, CB_3, 0x12345678);
+	trace_id = trace_id_from_ctx(ctx);
+	ctx_store_meta(ctx, CB_3, trace_id);
+
+    // Check if the trace ID is valid
+    if (trace_id > 0) {
+        // Save the trace ID using ctx_load_meta function
+        ctx_store_meta(ctx, CB_3, trace_id);
+    }
 
 	send_trace_notify(ctx, TRACE_FROM_LXC, sec_label, UNKNOWN_ID,
 			  TRACE_EP_ID_UNKNOWN, TRACE_IFINDEX_UNKNOWN,
