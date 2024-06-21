@@ -26,6 +26,7 @@
 #include "common.h"
 #include "utils.h"
 #include "metrics.h"
+#include "trace_helpers.h"
 
 /* Available observation points. */
 enum trace_point {
@@ -199,7 +200,7 @@ _send_trace_notify(struct __ctx_buff *ctx, enum trace_point obs_point,
 		   __u32 src, __u32 dst, __u16 dst_id, __u32 ifindex,
 		   enum trace_reason reason, __u32 monitor, __u16 line, __u8 file)
 {
-	__u32 trace_id = ctx_load_meta(ctx, CB_3);
+	__u32 trace_id = load_trace_id();
 	__u64 ctx_len = ctx_full_len(ctx);
 	__u64 cap_len = min_t(__u64, monitor ? : TRACE_PAYLOAD_LEN,
 			      ctx_len);
@@ -232,7 +233,7 @@ send_trace_notify4(struct __ctx_buff *ctx, enum trace_point obs_point,
 		   __u32 src, __u32 dst, __be32 orig_addr, __u16 dst_id,
 		   __u32 ifindex, enum trace_reason reason, __u32 monitor)
 {
-	__u32 trace_id = ctx_load_meta(ctx, CB_3);
+	__u32 trace_id = load_trace_id();
 	__u64 ctx_len = ctx_full_len(ctx);
 	__u64 cap_len = min_t(__u64, monitor ? : TRACE_PAYLOAD_LEN,
 			      ctx_len);
