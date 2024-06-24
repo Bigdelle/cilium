@@ -1210,6 +1210,9 @@ const (
 
 	// BPFEventsTraceEnabled defines the TraceNotification setting for any endpoint
 	BPFEventsTraceEnabled = "bpf-events-trace-enabled"
+
+	// EnableIPOptionTracing defines setting the trace option for packet ip options
+	EnableIPOptionTracing = "enable-ip-option-tracing"
 )
 
 // Default string arguments
@@ -2393,6 +2396,9 @@ type DaemonConfig struct {
 	// EnableNodeSelectorLabels enables use of the node label based identity
 	EnableNodeSelectorLabels bool
 
+	// EnableIPOptionTracing enables the use of tracing from packet IP options
+	EnableIPOptionTracing int
+
 	// NodeLabels is the list of label prefixes used to determine identity of a node (requires enabling of
 	// EnableNodeSelectorLabels)
 	NodeLabels []string
@@ -2450,6 +2456,7 @@ var (
 		BPFEventsPolicyVerdictEnabled: defaults.BPFEventsPolicyVerdictEnabled,
 		BPFEventsTraceEnabled:         defaults.BPFEventsTraceEnabled,
 		EnableEnvoyConfig:             defaults.EnableEnvoyConfig,
+		EnableIPOptionTracing:         defaults.EnableIPOptionTracing,
 	}
 )
 
@@ -3109,6 +3116,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.BPFEventsPolicyVerdictEnabled = vp.GetBool(BPFEventsPolicyVerdictEnabled)
 	c.BPFEventsTraceEnabled = vp.GetBool(BPFEventsTraceEnabled)
 	c.EnableIPSecEncryptedOverlay = vp.GetBool(EnableIPSecEncryptedOverlay)
+	c.EnableIPOptionTracing = vp.GetInt(EnableIPOptionTracing)
 
 	c.ServiceNoBackendResponse = vp.GetString(ServiceNoBackendResponse)
 	switch c.ServiceNoBackendResponse {

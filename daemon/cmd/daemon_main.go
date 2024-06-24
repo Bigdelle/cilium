@@ -1120,6 +1120,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableNodeSelectorLabels, defaults.EnableNodeSelectorLabels, "Enable use of node label based identity")
 	option.BindEnv(vp, option.EnableNodeSelectorLabels)
 
+	flags.Int(option.EnableIPOptionTracing, 0, "Enable packet IP tracing and specify the IP options to read from")
+	option.BindEnv(vp, option.EnableIPOptionTracing)
+
 	flags.StringSlice(option.NodeLabels, []string{}, "List of label prefixes used to determine identity of a node (used only when enable-node-selector-labels is enabled)")
 	option.BindEnv(vp, option.NodeLabels)
 

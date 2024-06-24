@@ -590,6 +590,9 @@ const (
 
 	// EnableEnvoyConfig is the default value for option.EnableEnvoyConfig
 	EnableEnvoyConfig = false
+
+	// EnablePacketIPTracing is the default value for option.EnablePacketIPTracing
+	EnableIPOptionTracing = 0
 )
 
 var (
