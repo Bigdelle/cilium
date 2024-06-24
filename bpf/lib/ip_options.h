@@ -3,34 +3,41 @@
 #define TRACE_IPV4_OPT_TYPE IPOPT_SID
 #define TRACE_IPV4_OPT_LEN 4
 #define MAX_IPV4_OPTS 3
+
 /* The minimum value for IHL which corresponds to a packet with no options.
  *
  * A standard IP packet header has 20 bytes and the IHL is the number of 32 byte
  * words.
  */
 #define IHL_WITH_NO_OPTS 5
+
 // Signifies that options were parsed correctly but no trace ID was found.
-#define TRACE_ID_NOT_FOUND 20
+#define TRACE_ID_NOT_FOUND 0
+
 // Signifies a failure to determine the trace ID based on an unspecified error.
-#define TRACE_ID_ERROR 1
+#define TRACE_ID_ERROR -1
+
 // Signifies that the trace ID was found but it was invalid
-#define TRACE_ID_INVALID 2
+#define TRACE_ID_INVALID -2
+
 /* Signifies a failure to determine trace ID because the IP family was not found. */
-#define TRACE_ID_NO_FAMILY 3
+#define TRACE_ID_NO_FAMILY -3
+
 /* Signifies that the TRACE_ID was never parsed.
  *
  * This should be used for initialization instead of 0, so that it is clear when
  * a datapath has erroneously tried to emit an event without attempting to parse
  * the trace ID from a packet.
  */
-#define TRACE_ID_UNSET 5
+#define TRACE_ID_UNSET -4
+
 /* Signifies trace points which are being ignored because they're in IPv6
  * code and not supported yet.
  */
 #define TRACE_ID_SKIP_IPV6 -100
+
 // Signifies that the trace ID feature is disabled.
 #define TRACE_ID_DISABLED -101
-// Enable using "enable-ip-option-tracing: true".
 
 /* trace_id_from_ip4 parses the IP options and returns the trace ID.
  *

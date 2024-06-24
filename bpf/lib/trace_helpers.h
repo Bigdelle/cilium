@@ -37,18 +37,19 @@ struct {
     })
 
 static __always_inline __u64 load_trace_id() {
-   return bpf_trace_id_get();
+    return bpf_trace_id_get();
 }
 
 // Function to check trace ID and store it if valid
 static __always_inline void check_and_store_trace_id(struct __ctx_buff *ctx) {
-    __u64 trace_id = trace_id_from_ctx(ctx);
+    __s16 trace_id; // will have to change this to be 64 bits, also change ip_options tracing to return 64 bits.
+    trace_id = trace_id_from_ctx(ctx);
 
     // Check if the trace ID is valid
-    if (trace_id != 0) {
+    if (trace_id > 0) {
         bpf_trace_id_set(trace_id);
     } else {
-        bpf_trace_id_set(0); // Zero-out if no trace_id
+        bpf_trace_id_set(0);
     }
 }
 
