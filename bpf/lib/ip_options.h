@@ -38,16 +38,6 @@
 // Signifies that the trace ID feature is disabled.
 #define TRACE_ID_DISABLED -101
 
-static __always_inline __u8 get_trace_ip_opt_type(__u8 opt_type_value)
-{
-    switch (opt_type_value) {
-        case 136:
-            return IPOPT_SID;
-        default:
-            return 0; // Default or invalid value
-    }
-}
-
 /* trace_id_from_ip4 parses the IP options and returns the trace ID.
  *
  * See trace_id_from_ctx for more info.
@@ -127,7 +117,6 @@ static __always_inline __s16 trace_id_from_ctx(struct __ctx_buff *ctx, __u8 ip_o
 	__u16 proto;
 	void *data, *data_end;
 	struct iphdr *ip4;
-	__u8 trace_ip_opt_type = get_trace_ip_opt_type(ip_opt_type_value);
 
 	if (!validate_ethertype(ctx, &proto)) {
 		return TRACE_ID_ERROR;
@@ -141,5 +130,5 @@ static __always_inline __s16 trace_id_from_ctx(struct __ctx_buff *ctx, __u8 ip_o
 	if (!revalidate_data(ctx, &data, &data_end, &ip4)) {
 		return TRACE_ID_ERROR;
 	}
-	return trace_id_from_ip4(ctx, ip4, trace_ip_opt_type);
+	return trace_id_from_ip4(ctx, ip4, ip_opt_type_value);
 }
