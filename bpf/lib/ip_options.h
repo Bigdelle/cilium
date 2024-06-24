@@ -1,6 +1,5 @@
 #include "common.h"
 
-#define TRACE_IPV4_OPT_TYPE IPOPT_SID
 #define TRACE_IPV4_OPT_LEN 4
 #define MAX_IPV4_OPTS 3
 
@@ -39,11 +38,21 @@
 // Signifies that the trace ID feature is disabled.
 #define TRACE_ID_DISABLED -101
 
+static __always_inline __u8 get_trace_ip_opt_type(__u8 opt_type_value)
+{
+    switch (opt_type_value) {
+        case 136:
+            return IPOPT_SID;
+        default:
+            return 0; // Default or invalid value
+    }
+}
+
 /* trace_id_from_ip4 parses the IP options and returns the trace ID.
  *
  * See trace_id_from_ctx for more info.
  */
-static __always_inline __s16 trace_id_from_ip4(struct __ctx_buff *ctx, struct iphdr* ip4)
+static __always_inline __s16 trace_id_from_ip4(struct __ctx_buff *ctx, struct iphdr* ip4, __u8 trace_ip_opt_type)
 {
 	__u32 offset;
 	__u32 end;
@@ -86,7 +95,7 @@ static __always_inline __s16 trace_id_from_ip4(struct __ctx_buff *ctx, struct ip
 		if (ctx_load_bytes(ctx, offset+1, &opt_len, 1) < 0) {
 			return TRACE_ID_ERROR;
 		}
-		if (opt_type != TRACE_IPV4_OPT_TYPE) {
+		if (opt_type != trace_ip_opt_type) {
 			// The length field represents the entire option length (including
 			// the type and length fields).
 			offset += opt_len;
@@ -113,11 +122,13 @@ static __always_inline __s16 trace_id_from_ip4(struct __ctx_buff *ctx, struct ip
 	return TRACE_ID_NOT_FOUND;
 }
 
-static __always_inline __s16 trace_id_from_ctx(struct __ctx_buff *ctx)
+static __always_inline __s16 trace_id_from_ctx(struct __ctx_buff *ctx, __u8 ip_opt_type_value)
 {
 	__u16 proto;
 	void *data, *data_end;
 	struct iphdr *ip4;
+	__u8 trace_ip_opt_type = get_trace_ip_opt_type(ip_opt_type_value);
+
 	if (!validate_ethertype(ctx, &proto)) {
 		return TRACE_ID_ERROR;
 	}
@@ -130,5 +141,5 @@ static __always_inline __s16 trace_id_from_ctx(struct __ctx_buff *ctx)
 	if (!revalidate_data(ctx, &data, &data_end, &ip4)) {
 		return TRACE_ID_ERROR;
 	}
-	return trace_id_from_ip4(ctx, ip4);
+	return trace_id_from_ip4(ctx, ip4, trace_ip_opt_type);
 }

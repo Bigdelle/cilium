@@ -580,7 +580,7 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 	int ret;
 
 #ifdef ENABLE_PACKET_IP_TRACING
-	check_and_store_trace_id(ctx);
+	check_and_store_trace_id(ctx, ENABLE_PACKET_IP_TRACING);
 #endif
 
 #ifndef ENABLE_HIGH_SCALE_IPCACHE

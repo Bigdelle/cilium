@@ -1279,7 +1279,7 @@ int cil_from_netdev(struct __ctx_buff *ctx)
 	int ret;
 	
 #ifdef ENABLE_PACKET_IP_TRACING
-	check_and_store_trace_id(ctx);
+	check_and_store_trace_id(ctx, ENABLE_PACKET_IP_TRACING);
 #endif
 
 	/* Filter allowed vlan id's and pass them back to kernel.
@@ -1689,7 +1689,7 @@ int cil_to_host(struct __ctx_buff *ctx)
 #endif /* ENABLE_HOST_FIREWALL */
 
 #ifdef ENABLE_PACKET_IP_TRACING
-	check_and_store_trace_id(ctx);
+	check_and_store_trace_id(ctx, ENABLE_PACKET_IP_TRACING);
 #endif
 
 out:
