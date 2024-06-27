@@ -279,6 +279,13 @@ func (p Printer) getSummary(f *flowpb.Flow) string {
 	return fmt.Sprintf("%s; Auth: %s", f.GetSummary(), auth)
 }
 
+func (p Printer) GetIpTraceID(f *flowpb.Flow) string {
+	if f.GetIpTraceId() != 0 {
+		return p.color.identity(fmt.Sprintf("trace_id: %#x", f.GetIpTraceId()))
+	}
+	return ""
+}
+
 func (p Printer) getAuth(f *flowpb.Flow) string {
 	auth := f.GetAuthType()
 	msg := auth.String()
@@ -386,6 +393,43 @@ func (p *Printer) WriteProtoFlow(res *observerpb.GetFlowsResponse) error {
 			p.getSummary(f))
 		if err != nil {
 			return fmt.Errorf("failed to write out packet: %w", err)
+		}
+	case TraceOutput:
+		var node string
+		src, dst := p.GetHostNames(f)
+		srcIdentity, dstIdentity := p.GetSecurityIdentities(f)
+
+		if p.opts.nodeName {
+			node = fmt.Sprintf(" [%s]", f.GetNodeName())
+		}
+		arrow := "->"
+		if f.GetIsReply() == nil {
+			// direction is unknown.
+			arrow = "<>"
+		} else if f.GetIsReply().GetValue() {
+			// flip the arrow and src/dst for reply packets.
+			src, dst = dst, src
+			srcIdentity, dstIdentity = dstIdentity, srcIdentity
+			arrow = "<-"
+		}
+		ipTraceID := p.GetIpTraceID(f)
+		if ipTraceID != "" {
+			_, err := fmt.Fprintf(p.opts.w,
+				"%s%s: %s %s %s %s %s %s %s %s %s\n",
+				fmtTimestamp(p.opts.timeFormat, f.GetTime()),
+				node,
+				ipTraceID,
+				src,
+				srcIdentity,
+				arrow,
+				dst,
+				dstIdentity,
+				GetFlowType(f),
+				p.getVerdict(f),
+				p.getSummary(f))
+			if err != nil {
+				return fmt.Errorf("failed to write out packet: %w", err)
+			}
 		}
 	case JSONLegacyOutput:
 		return p.jsonEncoder.Encode(f)

@@ -22,6 +22,8 @@ const (
 	DictOutput
 	// JSONPBOutput prints GetFlowsResponse as JSON according to proto3's JSON mapping.
 	JSONPBOutput
+	// TraceOutput prints flows such that they include the IP trace id, if it exists
+	TraceOutput
 )
 
 // Options for the printer.
@@ -64,6 +66,13 @@ func Compact() Option {
 func Dict() Option {
 	return func(opts *Options) {
 		opts.output = DictOutput
+	}
+}
+
+// Trace ...
+func Trace() Option {
+	return func(opts *Options) {
+		opts.output = TraceOutput
 	}
 }
 

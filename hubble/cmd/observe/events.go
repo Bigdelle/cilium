@@ -37,6 +37,8 @@ func handleEventsArgs(writer io.Writer, debug bool) error {
 			return fmt.Errorf("table output format is not compatible with follow mode")
 		}
 		opts = append(opts, hubprinter.Tab())
+	case "trace":
+		opts = append(opts, hubprinter.Trace())
 	default:
 		return fmt.Errorf("invalid output format: %s", formattingOpts.output)
 	}

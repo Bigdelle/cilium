@@ -626,6 +626,7 @@ func newFlowsCmdHelper(usage cmdUsage, vp *viper.Viper, ofilter *flowFilter) *co
 			"json",
 			"jsonpb",
 			"table",
+			"trace",
 		}, cobra.ShellCompDirectiveDefault
 	})
 	flowsCmd.RegisterFlagCompletionFunc("color", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
@@ -676,6 +677,8 @@ func handleFlowArgs(writer io.Writer, ofilter *flowFilter, debug bool) (err erro
 			return fmt.Errorf("table output format is not compatible with follow mode")
 		}
 		opts = append(opts, hubprinter.Tab())
+	case "trace":
+		opts = append(opts, hubprinter.Trace())
 	default:
 		return fmt.Errorf("invalid output format: %s", formattingOpts.output)
 	}
