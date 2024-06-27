@@ -289,11 +289,15 @@ func (n *TraceNotify) DataOffset() uint {
 	return traceNotifyLength[n.Version]
 }
 
+func (n *TraceNotify) GetTraceID() uint64 {
+	return n.TraceID
+}
+
 func (n *TraceNotify) traceIDString() string {
 	if n.TraceID != 0 { // eventually find a way to check if tag is enabled or not
-		return fmt.Sprintf("(Trace ID: %#x)", n.TraceID)
+		return fmt.Sprintf("ip_trace_id: %#x", n.TraceID)
 	}
-	return "(Trace ID: none)"
+	return ""
 }
 
 // DumpInfo prints a summary of the trace messages.
@@ -309,8 +313,14 @@ func (n *TraceNotify) DumpInfo(data []byte, numeric DisplayFormat, linkMonitor g
 	n.dumpIdentity(buf, numeric)
 	ifname := linkMonitor.Name(n.Ifindex)
 
-	fmt.Fprintf(buf, " %s state %s ifindex %s orig-ip %s: %s\n", n.traceIDString(), n.traceReasonString(),
-		ifname, n.OriginalIP().String(), GetConnectionSummary(data[hdrLen:]))
+	if n.TraceID != 0 {
+		fmt.Fprintf(buf, " %s state %s ifindex %s orig-ip %s: %s\n", n.traceIDString(), n.traceReasonString(),
+			ifname, n.OriginalIP().String(), GetConnectionSummary(data[hdrLen:]))
+	} else {
+		fmt.Fprintf(buf, " state %s ifindex %s orig-ip %s: %s\n", n.traceReasonString(),
+			ifname, n.OriginalIP().String(), GetConnectionSummary(data[hdrLen:]))
+	}
+
 	buf.Flush()
 }
 

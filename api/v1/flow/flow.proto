@@ -82,6 +82,8 @@ message Flow {
     // Cilium datapath trace reason info.
     TraceReason trace_reason = 36;
 
+    uint64 ip_trace_id = 38;
+
     // only applicable to Verdict = DROPPED.
     DropReason drop_reason_desc = 25;
 
