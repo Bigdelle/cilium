@@ -215,6 +215,7 @@ func newFlowFilter() *flowFilter {
 			{"uuid"},
 			{"traffic-direction"},
 			{"cel-expression"},
+			{"ip-trace-id"},
 		},
 	}
 }
@@ -528,6 +529,14 @@ func (of *flowFilter) set(f *filterTracker, name, val string, track bool) error 
 	case "trace-id":
 		f.apply(func(f *flowpb.FlowFilter) {
 			f.TraceId = append(f.GetTraceId(), val)
+		})
+	case "ip-trace-id":
+		identity, err := parseIdentity(val)
+		if err != nil {
+			return fmt.Errorf("invalid security identity, expected one of %v or a numeric value", reservedIdentitiesNames())
+		}
+		f.apply(func(f *flowpb.FlowFilter) {
+			f.IpTraceId = append(f.GetIpTraceId(), identity.Uint64())
 		})
 
 	case "verdict":

@@ -597,6 +597,9 @@ message FlowFilter {
     // trace_id filters flows by trace ID
     repeated string trace_id = 28;
 
+    // ip_trace_id filters flows by IP trace ID
+    repeated uint64 ip_trace_id = 37;
+
     // Experimental contains filters that are not stable yet. Support for
     // experimental features is always optional and subject to change.
     message Experimental {

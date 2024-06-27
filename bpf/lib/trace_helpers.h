@@ -6,11 +6,11 @@
 #include "common.h"
 #include "ip_options.h"
 
-// Define the trace ID map with __u64 trace_id
+// Define the ip trace ID map with __u64 trace_id
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
-    __type(key, __u32); // only one key here
+    __type(key, __u32); // only one key
     __type(value, __u64); // trace_id type
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } trace_id_map __section_maps_btf;

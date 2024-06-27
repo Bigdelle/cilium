@@ -565,6 +565,11 @@ func (id NumericIdentity) Uint32() uint32 {
 	return uint32(id)
 }
 
+// Uint64 normalizes the ID for use in BPF program.
+func (id NumericIdentity) Uint64() uint64 {
+	return uint64(id)
+}
+
 // GetLocalNodeID returns the configured local node numeric identity that is
 // set in tunnel headers when encapsulating packets originating from the local
 // node.
