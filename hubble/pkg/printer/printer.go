@@ -283,7 +283,7 @@ func (p Printer) GetIpTraceID(f *flowpb.Flow) string {
 	if f.GetIpTraceId() != 0 {
 		return p.color.identity(fmt.Sprintf("trace_id: %#x", f.GetIpTraceId()))
 	}
-	return ""
+	return p.color.identity("trace_id: none")
 }
 
 func (p Printer) getAuth(f *flowpb.Flow) string {
@@ -412,24 +412,21 @@ func (p *Printer) WriteProtoFlow(res *observerpb.GetFlowsResponse) error {
 			srcIdentity, dstIdentity = dstIdentity, srcIdentity
 			arrow = "<-"
 		}
-		ipTraceID := p.GetIpTraceID(f)
-		if ipTraceID != "" {
-			_, err := fmt.Fprintf(p.opts.w,
-				"%s%s: %s %s %s %s %s %s %s %s %s\n",
-				fmtTimestamp(p.opts.timeFormat, f.GetTime()),
-				node,
-				ipTraceID,
-				src,
-				srcIdentity,
-				arrow,
-				dst,
-				dstIdentity,
-				GetFlowType(f),
-				p.getVerdict(f),
-				p.getSummary(f))
-			if err != nil {
-				return fmt.Errorf("failed to write out packet: %w", err)
-			}
+		_, err := fmt.Fprintf(p.opts.w,
+			"%s%s: %s %s %s %s %s %s %s %s %s\n",
+			fmtTimestamp(p.opts.timeFormat, f.GetTime()),
+			node,
+			p.GetIpTraceID(f),
+			src,
+			srcIdentity,
+			arrow,
+			dst,
+			dstIdentity,
+			GetFlowType(f),
+			p.getVerdict(f),
+			p.getSummary(f))
+		if err != nil {
+			return fmt.Errorf("failed to write out packet: %w", err)
 		}
 	case JSONLegacyOutput:
 		return p.jsonEncoder.Encode(f)

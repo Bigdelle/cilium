@@ -1,6 +1,8 @@
 #include "common.h"
 
-#define TRACE_IPV4_OPT_LEN 4
+#define TRACE_IPV4_OPT1_LEN 4
+#define TRACE_IPV4_OPT2_LEN 6
+#define TRACE_IPV4_OPT3_LEN 10
 #define MAX_IPV4_OPTS 3
 
 /* The minimum value for IHL which corresponds to a packet with no options.
@@ -42,14 +44,14 @@
  *
  * See trace_id_from_ctx for more info.
  */
-static __always_inline __s16 trace_id_from_ip4(struct __ctx_buff *ctx, struct iphdr* ip4, __u8 trace_ip_opt_type)
+static __always_inline __s64 trace_id_from_ip4(struct __ctx_buff *ctx, struct iphdr* ip4, __u8 trace_ip_opt_type)
 {
 	__u32 offset;
 	__u32 end;
 	int i;
 	__u8 opt_type;
 	__u8 opt_len;
-	__s16 trace_id;
+	__s64 trace_id;
 
 	// Return immediately when there are no options in the header.
 	if (ip4->ihl <= IHL_WITH_NO_OPTS) {
@@ -91,15 +93,31 @@ static __always_inline __s16 trace_id_from_ip4(struct __ctx_buff *ctx, struct ip
 			offset += opt_len;
 			continue;
 		}
-		if (opt_len != TRACE_IPV4_OPT_LEN) {
+		if ((opt_len != TRACE_IPV4_OPT1_LEN) && (opt_len != TRACE_IPV4_OPT2_LEN) && (opt_len != TRACE_IPV4_OPT2_LEN)) {
 			return TRACE_ID_INVALID;
 		}
-
-		if (ctx_load_bytes(ctx, offset+2, &trace_id, sizeof(trace_id)) < 0) {
+		
+		if (opt_len == 4) {
+            __u16 temp;
+            if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
+                return TRACE_ID_ERROR;
+            }
+            trace_id = bpf_ntohs(temp);
+        } else if (opt_len == 6) {
+            __u32 temp;
+            if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
+                return TRACE_ID_ERROR;
+            }
+            trace_id = bpf_ntohl(temp);
+        } else if (opt_len == 10) {
+            __u64 temp;
+            if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
+                return TRACE_ID_ERROR;
+            }
+            trace_id = bpf_be64_to_cpu(temp);
+        } else {
 			return TRACE_ID_ERROR;
 		}
-		trace_id = bpf_ntohs(trace_id);
-
 		// Non-positive numbers are used to indicate error, missing or invalid
 		// trace ID.
 		if (trace_id <= 0) {
@@ -112,7 +130,7 @@ static __always_inline __s16 trace_id_from_ip4(struct __ctx_buff *ctx, struct ip
 	return TRACE_ID_NOT_FOUND;
 }
 
-static __always_inline __s16 trace_id_from_ctx(struct __ctx_buff *ctx, __u8 ip_opt_type_value)
+static __always_inline __s64 trace_id_from_ctx(struct __ctx_buff *ctx, __u8 ip_opt_type_value)
 {
 	__u16 proto;
 	void *data, *data_end;
