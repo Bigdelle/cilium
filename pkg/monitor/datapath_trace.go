@@ -42,20 +42,20 @@ const (
 // This struct needs to be kept in sync with the decodeTraceNotifyVersion0
 // func.
 type TraceNotifyV0 struct {
-	Type     uint8
-	ObsPoint uint8
-	Source   uint16
-	Hash     uint32
-	OrigLen  uint32
-	CapLen   uint16
-	Version  uint16
-	SrcLabel identity.NumericIdentity
-	DstLabel identity.NumericIdentity
-	DstID    uint16
-	Reason   uint8
-	Flags    uint8
-	Ifindex  uint32
-	TraceID  uint64
+	Type      uint8
+	ObsPoint  uint8
+	Source    uint16
+	Hash      uint32
+	OrigLen   uint32
+	CapLen    uint16
+	Version   uint16
+	SrcLabel  identity.NumericIdentity
+	DstLabel  identity.NumericIdentity
+	DstID     uint16
+	Reason    uint8
+	Flags     uint8
+	Ifindex   uint32
+	IPTraceID uint64
 	// data
 }
 
@@ -81,7 +81,7 @@ func (tn *TraceNotifyV0) decodeTraceNotifyVersion0(data []byte) error {
 	tn.Reason = data[26]
 	tn.Flags = data[27]
 	tn.Ifindex = byteorder.Native.Uint32(data[28:32])
-	tn.TraceID = byteorder.Native.Uint64(data[32:40])
+	tn.IPTraceID = byteorder.Native.Uint64(data[32:40])
 
 	return nil
 }
@@ -289,13 +289,13 @@ func (n *TraceNotify) DataOffset() uint {
 	return traceNotifyLength[n.Version]
 }
 
-func (n *TraceNotify) GetTraceID() uint64 {
-	return n.TraceID
+func (n *TraceNotify) GetIPTraceID() uint64 {
+	return n.IPTraceID
 }
 
-func (n *TraceNotify) traceIDString() string {
-	if n.TraceID != 0 { // eventually find a way to check if tag is enabled or not
-		return fmt.Sprintf("ip_trace_id: %#x", n.TraceID)
+func (n *TraceNotify) IPTraceIDString() string {
+	if n.IPTraceID != 0 { // eventually find a way to check if tag is enabled or not
+		return fmt.Sprintf("ip_trace_id: %#x", n.IPTraceID)
 	}
 	return ""
 }
@@ -313,8 +313,8 @@ func (n *TraceNotify) DumpInfo(data []byte, numeric DisplayFormat, linkMonitor g
 	n.dumpIdentity(buf, numeric)
 	ifname := linkMonitor.Name(n.Ifindex)
 
-	if n.TraceID != 0 {
-		fmt.Fprintf(buf, " %s state %s ifindex %s orig-ip %s: %s\n", n.traceIDString(), n.traceReasonString(),
+	if n.IPTraceID != 0 {
+		fmt.Fprintf(buf, " %s state %s ifindex %s orig-ip %s: %s\n", n.IPTraceIDString(), n.traceReasonString(),
 			ifname, n.OriginalIP().String(), GetConnectionSummary(data[hdrLen:]))
 	} else {
 		fmt.Fprintf(buf, " state %s ifindex %s orig-ip %s: %s\n", n.traceReasonString(),

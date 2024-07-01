@@ -36,12 +36,12 @@ struct {
         trace_id;                                         \
     })
 
-static __always_inline __u64 load_trace_id() {
+static __always_inline __u64 load_ip_trace_id() {
     return bpf_trace_id_get();
 }
 
 // Function to check trace ID and store it if valid
-static __always_inline void check_and_store_trace_id(struct __ctx_buff *ctx, __u8 ip_opt_type_value) {
+static __always_inline void check_and_store_ip_trace_id(struct __ctx_buff *ctx, __u8 ip_opt_type_value) {
     __s64 trace_id; // will have to change this to be 64 bits, also change ip_options tracing to return 64 bits.
     trace_id = trace_id_from_ctx(ctx, ip_opt_type_value);
 

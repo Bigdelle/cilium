@@ -464,7 +464,7 @@ func decodeIpTraceId(tn *monitor.TraceNotify) uint64 {
 	if tn == nil {
 		return 0
 	}
-	return tn.GetTraceID()
+	return tn.GetIPTraceID()
 }
 
 func decodeSecurityIdentities(dn *monitor.DropNotify, tn *monitor.TraceNotify, pvn *monitor.PolicyVerdictNotify) (

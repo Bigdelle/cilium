@@ -1451,7 +1451,7 @@ int cil_from_container(struct __ctx_buff *ctx)
 	reset_queue_mapping(ctx);
 	
 #ifdef ENABLE_PACKET_IP_TRACING
-	check_and_store_trace_id(ctx, ENABLE_PACKET_IP_TRACING);
+	check_and_store_ip_trace_id(ctx, ENABLE_PACKET_IP_TRACING);
 #endif
 
 	send_trace_notify(ctx, TRACE_FROM_LXC, sec_label, UNKNOWN_ID,

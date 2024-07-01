@@ -16,25 +16,33 @@ import (
 
 const (
 	// DropNotifyLen is the amount of packet data provided in a drop notification
-	DropNotifyLen = 36
+	DropNotifyLen = 44
 )
 
 // DropNotify is the message format of a drop notification in the BPF ring buffer
 type DropNotify struct {
-	Type     uint8
-	SubType  uint8
-	Source   uint16
-	Hash     uint32
-	OrigLen  uint32
-	CapLen   uint32
-	SrcLabel identity.NumericIdentity
-	DstLabel identity.NumericIdentity
-	DstID    uint32
-	Line     uint16
-	File     uint8
-	ExtError int8
-	Ifindex  uint32
+	Type      uint8
+	SubType   uint8
+	Source    uint16
+	Hash      uint32
+	OrigLen   uint32
+	CapLen    uint32
+	SrcLabel  identity.NumericIdentity
+	DstLabel  identity.NumericIdentity
+	DstID     uint32
+	Line      uint16
+	File      uint8
+	ExtError  int8
+	Ifindex   uint32
+	IPTraceID uint64
 	// data
+}
+
+func (n *DropNotify) IPTraceIDString() string {
+	if n.IPTraceID != 0 { // eventually find a way to check if tag is enabled or not
+		return fmt.Sprintf("ip_trace_id: %#x", n.IPTraceID)
+	}
+	return ""
 }
 
 // dumpIdentity dumps the source and destination identities in numeric or
@@ -70,6 +78,7 @@ func (n *DropNotify) decodeDropNotify(data []byte) error {
 	n.File = data[30]
 	n.ExtError = int8(data[31])
 	n.Ifindex = byteorder.Native.Uint32(data[32:36])
+	n.IPTraceID = byteorder.Native.Uint64(data[36:44])
 
 	return nil
 }
@@ -77,8 +86,13 @@ func (n *DropNotify) decodeDropNotify(data []byte) error {
 // DumpInfo prints a summary of the drop messages.
 func (n *DropNotify) DumpInfo(data []byte, numeric DisplayFormat) {
 	buf := bufio.NewWriter(os.Stdout)
-	fmt.Fprintf(buf, "xx drop (%s) flow %#x to endpoint %d, ifindex %d, file %s:%d, ",
-		api.DropReasonExt(n.SubType, n.ExtError), n.Hash, n.DstID, n.Ifindex, api.BPFFileName(n.File), int(n.Line))
+	if n.IPTraceID != 0 {
+		fmt.Fprintf(buf, "%s xx drop (%s) flow %#x to endpoint %d, ifindex %d, file %s:%d, ", n.IPTraceIDString(),
+			api.DropReasonExt(n.SubType, n.ExtError), n.Hash, n.DstID, n.Ifindex, api.BPFFileName(n.File), int(n.Line))
+	} else {
+		fmt.Fprintf(buf, "xx drop (%s) flow %#x to endpoint %d, ifindex %d, file %s:%d, ",
+			api.DropReasonExt(n.SubType, n.ExtError), n.Hash, n.DstID, n.Ifindex, api.BPFFileName(n.File), int(n.Line))
+	}
 	n.dumpIdentity(buf, numeric)
 	fmt.Fprintf(buf, ": %s\n", GetConnectionSummary(data[DropNotifyLen:]))
 	buf.Flush()
