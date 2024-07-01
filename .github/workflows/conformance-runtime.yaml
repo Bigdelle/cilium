@@ -167,8 +167,7 @@ jobs:
 
   setup-and-test:
     needs: build-ginkgo-binary
-    runs-on:
-      group: ginkgo-runners
+    runs-on: ${{ vars.GH_RUNNER_EXTRA_POWER }}
     name: "Runtime Test (${{matrix.focus}})"
     env:
       # GitHub doesn't provide a way to retrieve the name of a job, so we have
@@ -273,7 +272,7 @@ jobs:
           test-name: runtime-tests
           install-dependencies: true
           # renovate: datasource=docker depName=quay.io/lvh-images/kind
-          image-version: "bpf-next-20240617.013201@sha256:392254a5696a5d072b617bec6eb0049e7e2f38cdd79e8d9f4b67b0a4eba678b4"
+          image-version: "bpf-next-20240625.013127@sha256:ef9a0b84c0ccda32fd2693ea35a0fad217935cb19fba00b8a703ca71f6f2ac5d"
           host-mount: ./
           cpu: 4
           mem: 12G

@@ -123,7 +123,7 @@ ifeq ($(SKIP_KVSTORES),"false")
 endif
 
 generate-cov: ## Generate HTML coverage report at coverage-all.html.
-	# Remove generated code from coverage
+	-@# Remove generated code from coverage
 	$(QUIET) grep -Ev '(^github.com/cilium/cilium/api/v1)|(generated.deepcopy.go)|(^github.com/cilium/cilium/pkg/k8s/client/)' \
 		coverage.out > coverage.out.tmp
 	$(QUIET)$(GO) tool cover -html=coverage.out.tmp -o=coverage-all.html
@@ -519,9 +519,11 @@ help: ## Display help for the Makefile, from https://www.thapaliya.com/en/writin
 .PHONY: help clean clean-container dev-doctor force generate-api generate-health-api generate-operator-api generate-kvstoremesh-api generate-hubble-api install licenses-all veryclean run_bpf_tests run-builder
 force :;
 
+BPF_TEST_FILE ?= ""
+
 run_bpf_tests: ## Build and run the BPF unit tests using the cilium-builder container image.
 	DOCKER_ARGS=--privileged contrib/scripts/builder.sh \
-		"make" "-j$(shell nproc)" "-C" "bpf/tests/" "all" "run"
+		"make" "-j$(shell nproc)" "-C" "bpf/tests/" "run" "BPF_TEST_FILE=$(BPF_TEST_FILE)"
 
 run-builder: ## Drop into a shell inside a container running the cilium-builder image.
 	DOCKER_ARGS=-it contrib/scripts/builder.sh bash

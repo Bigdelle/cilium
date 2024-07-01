@@ -31,7 +31,7 @@ import (
 	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/ipcache"
 	ipcacheTypes "github.com/cilium/cilium/pkg/ipcache/types"
-	"github.com/cilium/cilium/pkg/k8s"
+	"github.com/cilium/cilium/pkg/k8s/synced"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
@@ -43,27 +43,7 @@ import (
 	"github.com/cilium/cilium/pkg/safetime"
 	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/time"
-	"github.com/cilium/cilium/pkg/trigger"
 )
-
-// initPolicy initializes the core policy components of the daemon.
-func (d *Daemon) initPolicy() error {
-	// Reuse policy.TriggerMetrics and PolicyTriggerInterval here since
-	// this is only triggered by agent configuration changes for now and
-	// should be counted in pol.TriggerMetrics.
-	rt, err := trigger.NewTrigger(trigger.Parameters{
-		Name:            "datapath-regeneration",
-		MetricsObserver: &policy.TriggerMetrics{},
-		MinInterval:     option.Config.PolicyTriggerInterval,
-		TriggerFunc:     d.datapathRegen,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create datapath regeneration trigger: %w", err)
-	}
-	d.datapathRegenTrigger = rt
-
-	return nil
-}
 
 type policyParams struct {
 	cell.In
@@ -72,7 +52,7 @@ type policyParams struct {
 	EndpointManager endpointmanager.EndpointManager
 	CertManager     certificatemanager.CertificateManager
 	SecretManager   certificatemanager.SecretManager
-	CacheStatus     k8s.CacheStatus
+	CacheStatus     synced.CacheStatus
 	ClusterInfo     cmtypes.ClusterInfo
 }
 
@@ -100,6 +80,11 @@ func newPolicyTrifecta(params policyParams) (policyOut, error) {
 		// Must be done before calling policy.NewPolicyRepository() below.
 		num := identity.InitWellKnownIdentities(option.Config, params.ClusterInfo)
 		metrics.Identity.WithLabelValues(identity.WellKnownIdentityType).Add(float64(num))
+		identity.WellKnown.ForEach(func(i *identity.Identity) {
+			for labelSource := range i.Labels.CollectSources() {
+				metrics.IdentityLabelSources.WithLabelValues(labelSource).Inc()
+			}
+		})
 	}
 
 	// policy repository: maintains list of active Rules and their subject

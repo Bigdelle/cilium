@@ -38,7 +38,7 @@ type RemoteCluster interface {
 	Run(ctx context.Context, backend kvstore.BackendOperations, config types.CiliumClusterConfig, ready chan<- error)
 
 	Stop()
-	Remove()
+	Remove(ctx context.Context)
 }
 
 // remoteCluster represents another cluster other than the cluster the agent is
@@ -124,14 +124,9 @@ func (rc *remoteCluster) releaseOldConnection() {
 	rc.etcdClusterID = ""
 	rc.mutex.Unlock()
 
-	// Release resources asynchronously in the background. Many of these
-	// operations may time out if the connection was closed due to an error
-	// condition.
-	go func() {
-		if backend != nil {
-			backend.Close(context.Background())
-		}
-	}()
+	if backend != nil {
+		backend.Close()
+	}
 }
 
 func (rc *remoteCluster) restartRemoteConnection() {
@@ -162,7 +157,7 @@ func (rc *remoteCluster) restartRemoteConnection() {
 
 				if err != nil {
 					if backend != nil {
-						backend.Close(ctx)
+						backend.Close()
 					}
 					rc.logger.WithError(err).Warning("Unable to establish etcd connection to remote cluster")
 					return err
@@ -390,9 +385,9 @@ func (rc *remoteCluster) onStop() {
 // (i.e., its configuration is removed). In this case, we need to drain
 // all known entries, to properly cleanup the status without requiring to
 // restart the agent.
-func (rc *remoteCluster) onRemove() {
+func (rc *remoteCluster) onRemove(ctx context.Context) {
 	rc.onStop()
-	rc.Remove()
+	rc.Remove(ctx)
 
 	rc.logger.Info("Remote cluster disconnected")
 }

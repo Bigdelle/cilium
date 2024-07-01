@@ -99,23 +99,23 @@ jobs:
 
       - name: Convert YAML to JSON
         run: |
-          work_dir=".github/actions/aws"
-          destination_directory="/tmp/generated/aws"
+          work_dir=".github/actions/eks"
+          destination_directory="/tmp/generated/eks"
           mkdir -p "${destination_directory}"
 
-          yq -o=json "${work_dir}/k8s-versions.yaml" | jq . > "${destination_directory}/aws.json"
+          yq -o=json "${work_dir}/k8s-versions.yaml" | jq . > "${destination_directory}/eks.json"
 
       - name: Generate Matrix
         run: |
-          cd /tmp/generated/aws
+          cd /tmp/generated/eks
 
           # Use complete matrix in case of scheduled run
           # main -> event_name = schedule
           # other stable branches -> PR-number starting with v (e.g. v1.14)
           if [[ "${{ github.event_name }}" == "schedule" || "${{ inputs.PR-number }}" == v* ]];then
-            cp aws.json /tmp/matrix.json
+            cp eks.json /tmp/matrix.json
           else
-            jq '{ "include": [ .include[] | select(.default) ] }' aws.json > /tmp/matrix.json
+            jq '{ "include": [ .include[] | select(.default) ] }' eks.json > /tmp/matrix.json
           fi
 
           echo "Generated matrix:"
@@ -190,7 +190,7 @@ jobs:
             OWNER="${{ inputs.PR-number }}"
           else
             OWNER="${{ github.ref_name }}"
-            OWNER="${OWNER/./-}"
+            OWNER="${OWNER//[.\/]/-}"
           fi
 
           CILIUM_INSTALL_DEFAULTS="${{ steps.default_vars.outputs.cilium_install_defaults }} \
@@ -215,7 +215,7 @@ jobs:
           echo owner=${OWNER} >> $GITHUB_OUTPUT
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@511f0173c21db1c3c959b96fd68eef18f83a0a9f # v0.16.10
+        uses: cilium/cilium-cli@9d071f99ae32af95cb15c3e0a280d222b569a1cf # v0.16.11
         with:
           repository: ${{ env.CILIUM_CLI_RELEASE_REPO }}
           release-version: ${{ env.CILIUM_CLI_VERSION }}

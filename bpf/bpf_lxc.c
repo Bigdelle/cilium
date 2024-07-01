@@ -573,9 +573,6 @@ ct_recreate6:
 		return DROP_UNKNOWN_CT;
 	}
 
-	if (!revalidate_data(ctx, &data, &data_end, &ip6))
-		return DROP_INVALID;
-
 #ifdef ENABLE_SRV6
 	{
 		__u32 *vrf_id;
@@ -1191,12 +1188,12 @@ skip_vtep:
 	if (!skip_tunnel) {
 		struct tunnel_key key = {};
 
-		if (cluster_id > UINT8_MAX)
+		if (cluster_id > UINT16_MAX)
 			return DROP_INVALID_CLUSTER_ID;
 
 		key.ip4 = ip4->daddr & IPV4_MASK;
 		key.family = ENDPOINT_KEY_IPV4;
-		key.cluster_id = (__u8)cluster_id;
+		key.cluster_id = (__u16)cluster_id;
 
 #if !defined(ENABLE_NODEPORT) && defined(ENABLE_HOST_FIREWALL)
 		/*
@@ -1907,13 +1904,9 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, int ifindex, __u32 src_la
 	 * connection. Populate
 	 * - .loopback, so that policy enforcement is bypassed, and
 	 * - .rev_nat_index, so that replies can be RevNATed.
-	 *
-	 * TODO: in v1.17, remove the rev_nat_index part. We're no longer driving
-	 * RevNAT from this CT entry.
 	 */
 	if (ret == CT_NEW && ip4->saddr == IPV4_LOOPBACK &&
-	    ct_has_loopback_egress_entry4(get_ct_map4(tuple), tuple,
-					  &ct_state_new.rev_nat_index)) {
+	    ct_has_loopback_egress_entry4(get_ct_map4(tuple), tuple)) {
 		ct_state_new.loopback = true;
 		goto skip_policy_enforcement;
 	}
