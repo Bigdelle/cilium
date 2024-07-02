@@ -109,12 +109,12 @@ static __always_inline __s64 trace_id_from_ip4(struct __ctx_buff *ctx, struct ip
                 return TRACE_ID_ERROR;
             }
             trace_id = bpf_ntohl(temp);
-        } else if (opt_len == 10) {
-            __u64 temp;
-            if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
-                return TRACE_ID_ERROR;
-            }
-            trace_id = bpf_be64_to_cpu(temp);
+        // } else if (opt_len == 10) {
+        //     __u64 temp;
+        //     if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
+        //         return TRACE_ID_ERROR;
+        //     }
+        //     trace_id = temp;
         } else {
 			return TRACE_ID_ERROR;
 		}
