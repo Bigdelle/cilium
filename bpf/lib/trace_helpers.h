@@ -6,6 +6,7 @@
 #include "common.h"
 #include "ip_options.h"
 
+#ifdef ENABLE_PACKET_IP_TRACING
 // Define the ip trace ID map with __u64 trace_id
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -36,10 +37,6 @@ struct {
         trace_id;                                         \
     })
 
-static __always_inline __u64 load_ip_trace_id() {
-    return bpf_trace_id_get();
-}
-
 // Function to check trace ID and store it if valid
 static __always_inline void check_and_store_ip_trace_id(struct __ctx_buff *ctx, __u8 ip_opt_type_value) {
     __s64 trace_id;
@@ -51,6 +48,18 @@ static __always_inline void check_and_store_ip_trace_id(struct __ctx_buff *ctx, 
     } else {
         bpf_trace_id_set(0);
     }
+}
+
+#else
+
+/* Provide alternative definitions for when tracing is disabled */
+
+#define bpf_trace_id_get() (0)
+
+#endif /* ENABLE_PACKET_IP_TRACING */
+
+static __always_inline __u64 load_ip_trace_id() {
+    return bpf_trace_id_get();
 }
 
 #endif // TRACE_ID_UTIL_H
