@@ -359,27 +359,6 @@ static __always_inline int check_filters(struct __ctx_buff *ctx)
 __section_entry
 int cil_xdp_entry(struct __ctx_buff *ctx)
 {
-	void *data, *data_meta;
-    int ret;
-    ret = ctx_adjust_meta(ctx, -(int)sizeof(__u32));
-
-    if (ret != 0){
-        return XDP_DROP;
-    }
-
-
-    data = (void *)(long)ctx->data;
-    data_meta = (void *)(long)ctx->data_meta;
-
-    if (data_meta + sizeof(__u32) > data){
-        return XDP_DROP;
-    }
-
-    // Set the trace_id in the metadata area
-    *(__u32 *)data_meta = 0x12345678;
-
-    return XDP_PASS;
-
 	return check_filters(ctx);
 }
 
