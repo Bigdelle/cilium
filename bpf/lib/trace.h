@@ -190,8 +190,6 @@ emit_trace_notify(enum trace_point obs_point, __u32 monitor)
 	return true;
 }
 
-#define HARDCODED_TRACE_ID 0x123456789ABCDEF0
-
 #define send_trace_notify(ctx, obs_point, src, dst, dst_id, ifindex, reason, monitor) \
 		_send_trace_notify(ctx, obs_point, src, dst, dst_id, ifindex, reason, monitor, \
 		__MAGIC_LINE__, __MAGIC_FILE__)

@@ -1,8 +1,15 @@
 #include "common.h"
 
+// Length of the first supported IPv4 trace_id option (4 bytes).
 #define TRACE_IPV4_OPT1_LEN 4
+
+// Length of the second supported IPv4 trace_id option (6 bytes).
 #define TRACE_IPV4_OPT2_LEN 6
+
+// Length of the third supported IPv4 trace_id option (10 bytes).
 #define TRACE_IPV4_OPT3_LEN 10
+
+// Maximum number of IPv4 options to process.
 #define MAX_IPV4_OPTS 3
 
 /* The minimum value for IHL which corresponds to a packet with no options.
@@ -18,10 +25,10 @@
 // Signifies a failure to determine the trace ID based on an unspecified error.
 #define TRACE_ID_ERROR -1
 
-// Signifies that the trace ID was found but it was invalid
+// Signifies that the trace ID was found but it was invalid.
 #define TRACE_ID_INVALID -2
 
-/* Signifies a failure to determine trace ID because the IP family was not found. */
+// Signifies a failure to determine trace ID because the IP family was not found.
 #define TRACE_ID_NO_FAMILY -3
 
 /* Signifies that the TRACE_ID was never parsed.
@@ -39,6 +46,19 @@
 
 // Signifies that the trace ID feature is disabled.
 #define TRACE_ID_DISABLED -101
+
+// Converts a 64-bit integer from network byte order to host byte order.
+static __always_inline __u64 ntohll(__u64 value)
+{
+    return ((value & 0x00000000000000FFULL) << 56) |
+           ((value & 0x000000000000FF00ULL) << 40) |
+           ((value & 0x0000000000FF0000ULL) << 24) |
+           ((value & 0x00000000FF000000ULL) << 8)  |
+           ((value & 0x000000FF00000000ULL) >> 8)  |
+           ((value & 0x0000FF0000000000ULL) >> 24) |
+           ((value & 0x00FF000000000000ULL) >> 40) |
+           ((value & 0xFF00000000000000ULL) >> 56);
+}
 
 /* trace_id_from_ip4 parses the IP options and returns the trace ID.
  *
@@ -93,43 +113,68 @@ static __always_inline __s64 trace_id_from_ip4(struct __ctx_buff *ctx, struct ip
 			offset += opt_len;
 			continue;
 		}
-		if ((opt_len != TRACE_IPV4_OPT1_LEN) && (opt_len != TRACE_IPV4_OPT2_LEN) && (opt_len != TRACE_IPV4_OPT2_LEN)) {
+		if ((opt_len != TRACE_IPV4_OPT1_LEN) && (opt_len != TRACE_IPV4_OPT2_LEN) && (opt_len != TRACE_IPV4_OPT3_LEN)) {
 			return TRACE_ID_INVALID;
 		}
 		
 		if (opt_len == 4) {
-            __u16 temp;
+            __s16 temp;
             if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
                 return TRACE_ID_ERROR;
             }
-            trace_id = bpf_ntohs(temp);
+            temp = bpf_ntohs(temp);
+			if (temp <= 0) {
+				return TRACE_ID_INVALID;
+			}
+			trace_id = temp;
         } else if (opt_len == 6) {
-            __u32 temp;
+            __s32 temp;
             if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
                 return TRACE_ID_ERROR;
             }
-            trace_id = bpf_ntohl(temp);
-        // } else if (opt_len == 10) {
-        //     __u64 temp;
-        //     if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
-        //         return TRACE_ID_ERROR;
-        //     }
-        //     trace_id = temp;
+            temp = bpf_ntohl(temp);
+			if (temp <= 0) {
+				return TRACE_ID_INVALID;
+			}
+			trace_id = temp;
+        } else if (opt_len == 10) {
+            __s64 temp;
+            if (ctx_load_bytes(ctx, offset + 2, &temp, sizeof(temp)) < 0) {
+                return TRACE_ID_ERROR;
+            }
+			temp = ntohll(temp);
+			if (temp <= 0) {
+				return TRACE_ID_INVALID;
+			}
+            trace_id = temp;
         } else {
 			return TRACE_ID_ERROR;
 		}
-		// Non-positive numbers are used to indicate error, missing or invalid
-		// trace ID.
-		if (trace_id <= 0) {
-			return TRACE_ID_INVALID;
-		}
-
 		return trace_id;
 	}
 
 	return TRACE_ID_NOT_FOUND;
 }
 
+/* 
+ * Parses the context to extract the trace ID from the IP options.
+ * 
+ * Arguments:
+ * - ctx: The context buffer from which the IP options will be read.
+ * - ip_opt_type_value: The type value of the IP option that contains the trace ID.
+ * 
+ * Prerequisites:
+ * - Supports reading a trace ID embedded in IP options with lengths of 2, 4, or 8 bytes.
+ * - No support for trace_ids that are not 2, 4, or 8 bytes.
+ * 
+ * Outputs:
+ * - Returns the extracted trace ID if it is found and valid.
+ * - Returns TRACE_ID_NOT_FOUND if no trace ID is found in the options.
+ * - Returns TRACE_ID_INVALID if the found trace ID is invalid (e.g., non-positive).
+ * - Returns TRACE_ID_ERROR if there is an error during parsing.
+ * - Returns TRACE_ID_NO_FAMILY if the packet is not IPv4.
+ * - Returns TRACE_ID_SKIP_IPV6 if the packet is IPv6.
+ */
 static __always_inline __s64 trace_id_from_ctx(struct __ctx_buff *ctx, __u8 ip_opt_type_value)
 {
 	__u16 proto;
