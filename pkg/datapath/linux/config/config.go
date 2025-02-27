@@ -685,6 +685,11 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	// Write Identity and ClusterID related macros.
 	cDefinesMap["CLUSTER_ID_MAX"] = fmt.Sprintf("%d", option.Config.MaxConnectedClusters)
 
+	// Write IP_OPTION_TRACING_TYPE macro from EnablePacketIPTracing value
+	if option.Config.IPTracingOptionType > 0 {
+		cDefinesMap["IP_TRACING_OPTION_TYPE"] = strconv.Itoa(int(option.Config.IPTracingOptionType))
+	}
+
 	fmt.Fprint(fw, declareConfig("identity_length", identity.GetClusterIDShift(), "Identity length in bits"))
 	fmt.Fprint(fw, assignConfig("identity_length", identity.GetClusterIDShift()))
 
