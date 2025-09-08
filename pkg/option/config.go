@@ -219,6 +219,9 @@ const (
 	// EnableHostLegacyRouting enables the old routing path via stack.
 	EnableHostLegacyRouting = "enable-host-legacy-routing"
 
+	// EnableIntraNodeVisibility enables intra-node visibility for direct routing mode
+	EnableIntraNodeVisibility = "enable-intra-node-visibility"
+
 	// NodePortAcceleration indicates whether NodePort should be accelerated
 	// via XDP ("none", "generic", "native", or "best-effort")
 	NodePortAcceleration = "node-port-acceleration"
@@ -1594,6 +1597,9 @@ type DaemonConfig struct {
 	// EnableHostLegacyRouting enables the old routing path via stack.
 	EnableHostLegacyRouting bool
 
+	// EnableIntraNodeVisibility enables intra-node visibility for direct routing mode
+	EnableIntraNodeVisibility bool
+
 	// NodePortNat46X64 indicates whether NAT46 / NAT64 can be used.
 	NodePortNat46X64 bool
 
@@ -2309,6 +2315,10 @@ func (c *DaemonConfig) Validate(vp *viper.Viper) error {
 		return err
 	}
 
+	if c.EnableIntraNodeVisibility && c.EnableHostLegacyRouting {
+		return fmt.Errorf("intra-node visibility can not be enabled with legacy host routing")
+	}
+
 	if err := c.checkIPv4NativeRoutingCIDR(); err != nil {
 		return err
 	}
@@ -2511,6 +2521,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
 	c.EnableIPIPDevices = c.EnableIPIPTermination
 	c.EnableUnreachableRoutes = vp.GetBool(EnableUnreachableRoutes)
 	c.EnableHostLegacyRouting = vp.GetBool(EnableHostLegacyRouting)
+	c.EnableIntraNodeVisibility = vp.GetBool(EnableIntraNodeVisibility)
 	c.NodePortBindProtection = vp.GetBool(NodePortBindProtection)
 	c.NodePortNat46X64 = vp.GetBool(LoadBalancerNat46X64)
 	c.EnableAutoProtectNodePortRange = vp.GetBool(EnableAutoProtectNodePortRange)

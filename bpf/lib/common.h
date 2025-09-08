@@ -590,6 +590,8 @@ enum metric_dir {
  */
 #define MARK_MAGIC_CLUSTER_ID		MARK_MAGIC_TO_PROXY
 
+#define MARK_MAGIC_INTRA_NODE 0x10000
+
 /* IPv4 option used to carry service addr and port for DSR.
  *
  * Copy = 1 (option is copied to each fragment)

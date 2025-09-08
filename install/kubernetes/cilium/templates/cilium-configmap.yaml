@@ -406,6 +406,10 @@ data:
   enable-host-legacy-routing: "true"
 {{- end }}
 
+{{- if .Values.bpf.intraNodeVisibility.enabled }}
+  enable-intra-node-visibility: "true"
+{{- end }}
+
 {{- if .Values.bpf.nodeMapMax }}
   # node-map-max specifies the maximum number of entries for the node map.
   bpf-node-map-max: {{ .Values.bpf.nodeMapMax | quote }}

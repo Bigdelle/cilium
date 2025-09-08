@@ -13,6 +13,9 @@ inputs:
   endpoint-routes:
     description: 'Enable endpoint routes'
     default: 'false'
+  intra-node-visibility:
+    description: 'Enable intra-node visibility'
+    default: 'false'
   ipv4:
     description: 'Enable IPv4'
     default: 'true'
@@ -155,6 +158,11 @@ runs:
             ENDPOINT_ROUTES="--helm-set-string=endpointRoutes.enabled=true"
           fi
 
+          INTRA_NODE_VISIBILITY=""
+          if [ "${{ inputs.intra-node-visibility }}" == "true" ]; then
+            INTRA_NODE_VISIBILITY="--helm-set=bpf.intraNodeVisibility.enabled=true"
+          fi
+
           IPV4=""
           if [ "${{ inputs.ipv4 }}" == "false" ]; then
             IPV4="--helm-set=ipv4.enabled=false"
@@ -222,5 +230,5 @@ runs:
             BGP_CONTROL_PLANE="${{ env.BGP_CONTROL_PLANE_HELM_VALUES }}"
           fi
 
-          CONFIG="${DEFAULTS} ${IMAGE} ${TUNNEL} ${DEVICES} ${LB_MODE} ${ENDPOINT_ROUTES} ${IPV4} ${IPV6} ${MASQ} ${EGRESS_GATEWAY} ${ENCRYPT} ${HOST_FW} ${LB_ACCELERATION} ${INGRESS_CONTROLLER} ${CILIUMENDPOINTSLICE} ${LOCAL_REDIRECT_POLICY} ${BGP_CONTROL_PLANE}"
+          CONFIG="${DEFAULTS} ${IMAGE} ${TUNNEL} ${DEVICES} ${LB_MODE} ${ENDPOINT_ROUTES} ${INTRA_NODE_VISIBILITY} ${IPV4} ${IPV6} ${MASQ} ${EGRESS_GATEWAY} ${ENCRYPT} ${HOST_FW} ${LB_ACCELERATION} ${INGRESS_CONTROLLER} ${CILIUMENDPOINTSLICE} ${LOCAL_REDIRECT_POLICY} ${BGP_CONTROL_PLANE}"
           echo "config=${CONFIG}" >> $GITHUB_OUTPUT

@@ -1244,6 +1244,17 @@ ct_recreate4:
 			}
 #endif /* ENABLE_HOST_ROUTING || ENABLE_ROUTING */
 
+			cilium_dbg3(ctx, DBG_GENERIC, 9900, ctx->mark, 0);
+			if (CONFIG(intra_node_visibility_enabled)) {
+				// With intra-node-visibility enabled, deliver to stack.
+				printk("markstjohn: current mark: %d", ctx->mark);
+				printk("markstjohn: apply intra node mark: %d", MARK_MAGIC_INTRA_NODE);
+				ctx->mark |= MARK_MAGIC_INTRA_NODE;
+				cilium_dbg3(ctx, DBG_GENERIC, 9901, ctx->mark, 0);
+				goto intra_node_visibility_delivery;
+			}
+
+
 			/* If the packet is from L7 LB it is coming from the host */
 			return ipv4_local_delivery(ctx, ETH_HLEN, SECLABEL_IPV4,
 						   MARK_MAGIC_IDENTITY, ip4,
@@ -1333,11 +1344,13 @@ skip_vtep:
 		}
 	}
 #endif /* TUNNEL_MODE */
+intra_node_visibility_delivery:
 
 	if (is_defined(ENABLE_HOST_ROUTING)) {
 		int oif = 0;
+		cilium_dbg3(ctx, DBG_GENERIC, 9902, ctx->mark, oif);
 
-		ret = fib_redirect_v4(ctx, ETH_HLEN, ip4, false, false, ext_err, &oif);
+		ret = fib_redirect_v4(ctx, ETH_HLEN, ip4, false, false, ext_err, &oif, ctx->mark & MARK_MAGIC_INTRA_NODE);
 		/* Error handling for local routes - just pass the packet to the kernel stack */
 		if (ret == DROP_NO_FIB && *ext_err == BPF_FIB_LKUP_RET_NOT_FWDED) {
 			if (!revalidate_data(ctx, &data, &data_end, &ip4))

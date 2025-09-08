@@ -33,6 +33,8 @@ func NodeConfig(lnc *datapath.LocalNodeConfiguration) Node {
 
 	node.SupportsFibLookupSkipNeigh = probes.HaveFibLookupSkipNeigh() == nil
 
+	node.IntraNodeVisibilityEnabled = option.Config.EnableIntraNodeVisibility
+
 	node.TracingIPOptionType = uint8(option.Config.IPTracingOptionType)
 
 	if option.Config.PolicyDenyResponse == option.PolicyDenyResponseIcmp {

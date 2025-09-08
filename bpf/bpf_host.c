@@ -1348,6 +1348,7 @@ __section_entry
 int cil_to_netdev(struct __ctx_buff *ctx)
 {
 	__u32 magic = ctx->mark & MARK_MAGIC_HOST_MASK;
+	__u32 intra_node_mark = ctx->mark & MARK_MAGIC_INTRA_NODE;
 	__u32 dst_sec_identity = UNKNOWN_ID;
 	__u32 src_sec_identity = UNKNOWN_ID;
 	struct trace_ctx trace = {
@@ -1361,6 +1362,15 @@ int cil_to_netdev(struct __ctx_buff *ctx)
 
 	bpf_clear_meta(ctx);
 	check_and_store_ip_trace_id(ctx);
+
+	// Hack for now.
+	cilium_dbg3(ctx, DBG_GENERIC, 9910, intra_node_mark,0);
+	if (CONFIG(intra_node_visibility_enabled) && intra_node_mark ==  MARK_MAGIC_INTRA_NODE) {
+		printk("markstjohn: found intra_node_mark: %d", intra_node_mark);
+		printk("markstjohn: Skip further host processing for intra-node visibile flow at netdev device");
+		cilium_dbg3(ctx, DBG_GENERIC, 9911, intra_node_mark, 0);
+		return CTX_ACT_OK;
+	}
 
 	if (magic == MARK_MAGIC_HOST || magic == MARK_MAGIC_OVERLAY || ctx_mark_is_encrypted(ctx))
 		src_sec_identity = HOST_ID;

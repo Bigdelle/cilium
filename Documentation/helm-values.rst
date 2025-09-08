@@ -392,6 +392,14 @@
      - Configure whether direct routing mode should route traffic via host stack (true) or directly and more efficiently out of BPF (false) if the kernel supports it. The latter has the implication that it will also bypass netfilter in the host namespace.
      - bool
      - ``false``
+   * - :spelling:ignore:`bpf.intraNodeVisibility`
+     - Enable intra-node visibility for direct routing mode. This is an experimental feature.
+     - object
+     - ``{"enabled":false}``
+   * - :spelling:ignore:`bpf.intraNodeVisibility.enabled`
+     - Enable intra-node visibility.
+     - bool
+     - ``false``
    * - :spelling:ignore:`bpf.lbAlgorithmAnnotation`
      - Enable the option to define the load balancing algorithm on a per-service basis through service.cilium.io/lb-algorithm annotation.
      - bool

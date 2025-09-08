@@ -677,6 +677,12 @@ bpf:
   # bypass netfilter in the host namespace.
   # @default -- `false`
   hostLegacyRouting: ~
+  # -- Enable intra-node visibility for direct routing mode.
+  # This is an experimental feature.
+  intraNodeVisibility:
+  # -- (bool) Enable intra-node visibility.
+  # @default -- `false`
+    enabled: false
   # @schema
   # type: [null, boolean]
   # @schema

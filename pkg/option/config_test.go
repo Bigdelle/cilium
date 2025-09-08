@@ -1104,6 +1104,51 @@ func TestDaemonConfig_validateContainerIPLocalReservedPorts(t *testing.T) {
 	}
 }
 
+func TestIntraNodeVisibilityValidation(t *testing.T) {
+	tests := []struct {
+		name                      string
+		EnableIntraNodeVisibility bool
+		EnableHostLegacyRouting   bool
+		wantErr                   assert.ErrorAssertionFunc
+	}{
+		{
+			name:                      "both disabled",
+			EnableIntraNodeVisibility: false,
+			EnableHostLegacyRouting:   false,
+			wantErr:                   assert.NoError,
+		},
+		{
+			name:                      "intra-node visibility enabled, legacy host routing disabled",
+			EnableIntraNodeVisibility: true,
+			EnableHostLegacyRouting:   false,
+			wantErr:                   assert.NoError,
+		},
+		{
+			name:                      "intra-node visibility disabled, legacy host routing enabled",
+			EnableIntraNodeVisibility: false,
+			EnableHostLegacyRouting:   true,
+			wantErr:                   assert.NoError,
+		},
+		{
+			name:                      "both enabled",
+			EnableIntraNodeVisibility: true,
+			EnableHostLegacyRouting:   true,
+			wantErr:                   assert.Error,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &DaemonConfig{
+				EnableIntraNodeVisibility: tt.EnableIntraNodeVisibility,
+				EnableHostLegacyRouting:   tt.EnableHostLegacyRouting,
+				IPv6ClusterAllocCIDR:      defaults.IPv6ClusterAllocCIDR,
+				IPv6NAT46x64CIDR:          defaults.IPv6NAT46x64CIDR,
+			}
+			tt.wantErr(t, d.Validate(viper.New()), fmt.Sprintf("Validate(%v)", tt.name))
+		})
+	}
+}
+
 func TestDaemonConfig_StoreInFile(t *testing.T) {
 	logger := hivetest.Logger(t)
 	// Set an IntOption so that they are also stored in file

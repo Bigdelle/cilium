@@ -29,12 +29,13 @@ type Metrics struct {
 	CPIdentityAllocation          metric.Vec[metric.Gauge]
 	CPCiliumEndpointSlicesEnabled metric.Gauge
 
-	DPMode           metric.Vec[metric.Gauge]
-	DPChaining       metric.Vec[metric.Gauge]
-	DPIP             metric.Vec[metric.Gauge]
-	DPDeviceConfig   metric.Vec[metric.Gauge]
-	DPEndpointRoutes metric.Gauge
-	DPKernelVersion  metric.Vec[metric.Gauge]
+	DPMode                       metric.Vec[metric.Gauge]
+	DPChaining                   metric.Vec[metric.Gauge]
+	DPIP                         metric.Vec[metric.Gauge]
+	DPIntraNodeVisibilityEnabled metric.Gauge
+	DPDeviceConfig               metric.Vec[metric.Gauge]
+	DPEndpointRoutes             metric.Gauge
+	DPKernelVersion              metric.Vec[metric.Gauge]
 
 	NPHostFirewallEnabled        metric.Gauge
 	NPLocalRedirectPolicyEnabled metric.Gauge
@@ -354,6 +355,13 @@ func NewMetrics(withDefaults bool) Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: subsystemDP,
 			Name:      "endpoint_routes_enabled",
+		}),
+
+		DPIntraNodeVisibilityEnabled: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Intra-node visibility enabled on the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemDP,
+			Name:      "intra_node_visibility_enabled",
 		}),
 
 		DPKernelVersion: metric.NewGaugeVecWithLabels(metric.GaugeOpts{
@@ -1014,6 +1022,10 @@ func (m Metrics) update(params enabledFeatures, config *option.DaemonConfig, lbC
 
 	if config.EnableEndpointRoutes {
 		m.DPEndpointRoutes.Set(1)
+	}
+
+	if config.EnableIntraNodeVisibility {
+		m.DPIntraNodeVisibilityEnabled.Set(1)
 	}
 
 	// Get kernel version - this would need to be implemented to detect actual kernel version

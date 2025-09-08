@@ -154,6 +154,10 @@ type LocalNodeConfiguration struct {
 	// subsequent calls to NodeConfigurationChanged().
 	EnableAutoDirectRouting bool
 
+	// EnableIntraNodeVisibility will always redirect intra-node flows to the
+	//  direct routing device.
+	EnableIntraNodeVisibility bool
+
 	// DirectRoutingSkipUnreachable will skip any direct routes between
 	// nodes if they have different L2 connectivity, only adding L2 routes
 	// if the underlying L2 shares the same gateway.

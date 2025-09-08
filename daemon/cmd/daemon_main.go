@@ -322,6 +322,9 @@ func InitGlobalFlags(logger *slog.Logger, cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableHostLegacyRouting, defaults.EnableHostLegacyRouting, "Enable the legacy host forwarding model which does not bypass upper stack in host namespace")
 	option.BindEnv(vp, option.EnableHostLegacyRouting)
 
+	flags.Bool(option.EnableIntraNodeVisibility, defaults.EnableIntraNodeVisibility, "Enable intra-node visibility")
+	option.BindEnv(vp, option.EnableIntraNodeVisibility)
+
 	flags.String(option.EnablePolicy, option.DefaultEnforcement, "Enable policy enforcement")
 	option.BindEnv(vp, option.EnablePolicy)
 

@@ -128,6 +128,7 @@ func newLocalNodeConfig(
 		EnableIPv6:                   config.EnableIPv6,
 		EnableEncapsulation:          config.TunnelingEnabled(),
 		EnableAutoDirectRouting:      config.EnableAutoDirectRouting,
+		EnableIntraNodeVisibility:    config.EnableIntraNodeVisibility,
 		DirectRoutingSkipUnreachable: config.DirectRoutingSkipUnreachable,
 		EnableLocalNodeRoute:         config.EnableLocalNodeRoute && config.IPAM != ipamOption.IPAMENI && config.IPAM != ipamOption.IPAMAzure && config.IPAM != ipamOption.IPAMAlibabaCloud,
 		EnableWireguard:              wgAgent.Enabled(),

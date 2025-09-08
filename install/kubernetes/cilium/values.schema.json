@@ -604,6 +604,14 @@
             "boolean"
           ]
         },
+        "intraNodeVisibility": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "lbAlgorithmAnnotation": {
           "type": "boolean"
         },

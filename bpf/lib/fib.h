@@ -276,7 +276,7 @@ fib_lookup_v4(struct __ctx_buff *ctx, struct bpf_fib_lookup_padded *fib_params,
 static __always_inline int
 fib_redirect_v4(struct __ctx_buff *ctx, int l3_off,
 		struct iphdr *ip4, const bool needs_l2_check,
-		bool allow_neigh_map, __s8 *ext_err __maybe_unused, int *oif)
+		bool allow_neigh_map, __s8 *ext_err __maybe_unused, int *oif, bool intra_node_visible_redirect)
 {
 	struct bpf_fib_lookup_padded fib_params __maybe_unused = {0};
 	int ret;
@@ -284,7 +284,12 @@ fib_redirect_v4(struct __ctx_buff *ctx, int l3_off,
 	if (!is_defined(ENABLE_SKIP_FIB) || !neigh_resolver_available()) {
 		int fib_result;
 
-		fib_result = fib_lookup_v4(ctx, &fib_params, ip4->saddr, ip4->daddr, 0);
+		if (intra_node_visible_redirect) {
+			fib_result = fib_lookup_v4(ctx, &fib_params, ip4->saddr, 0, 0);
+		} else {
+			fib_result = fib_lookup_v4(ctx, &fib_params, ip4->saddr, ip4->daddr, 0);
+		}
+
 		switch (fib_result) {
 		case BPF_FIB_LKUP_RET_SUCCESS:
 		case BPF_FIB_LKUP_RET_NO_NEIGH:

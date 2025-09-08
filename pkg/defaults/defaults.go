@@ -204,6 +204,9 @@ const (
 	// EnableHostLegacyRouting is the default value for using the old routing path via stack.
 	EnableHostLegacyRouting = false
 
+	// EnableIntraNodeVisibility is the default value for forwarding packets from lxc to the stack.
+	EnableIntraNodeVisibility = false
+
 	// PreAllocateMaps is the default value for BPF map preallocation
 	PreAllocateMaps = true
 
