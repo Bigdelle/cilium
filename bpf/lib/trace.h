@@ -177,6 +177,9 @@ struct trace_notify {
 static __always_inline bool
 emit_trace_notify(enum trace_point obs_point, __u32 monitor)
 {
+	if (load_ip_trace_id())
+		return true;
+
 	if (MONITOR_AGGREGATION >= TRACE_AGGREGATE_RX) {
 		switch (obs_point) {
 		case TRACE_FROM_LXC:
@@ -225,10 +228,10 @@ _send_trace_notify(struct __ctx_buff *ctx, enum trace_point obs_point,
 
 	_update_trace_metrics(ctx, obs_point, reason, line, file);
 
-	if (!emit_trace_notify(obs_point, monitor))
+	if (!emit_trace_notify(obs_point, monitor) && ip_trace_id == 0)
 		return;
 
-	if (EVENTS_MAP_RATE_LIMIT > 0) {
+	if (EVENTS_MAP_RATE_LIMIT > 0 && ip_trace_id == 0) {
 		settings.bucket_size = EVENTS_MAP_BURST_LIMIT;
 		settings.tokens_per_topup = EVENTS_MAP_RATE_LIMIT;
 		if (!ratelimit_check_and_take(&rkey, &settings))

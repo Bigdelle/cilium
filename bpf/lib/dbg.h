@@ -3,6 +3,12 @@
 
 #pragma once
 
+#include "events.h"
+#include "notify.h"
+#include "common.h"
+#include "utils.h"
+#include "trace_helpers.h"
+
 /* Trace types */
 enum {
 	DBG_UNSPEC,
@@ -147,12 +153,6 @@ enum {
 #define EVENT_SOURCE 0
 #endif
 
-#ifdef DEBUG
-#include "events.h"
-#endif
-
-#include "notify.h"
-
 struct debug_msg {
 	NOTIFY_COMMON_HDR
 	__u32		arg1;
@@ -166,10 +166,15 @@ struct debug_capture_msg {
 	__u32		arg2;
 };
 
+static __always_inline bool cilium_should_debug(void)
+{
 #ifdef DEBUG
-#include "common.h"
-#include "utils.h"
+	return true;
+#endif
+	return load_ip_trace_id();
+}
 
+#ifdef DEBUG
 /* This takes both literals and modifiers, e.g.,
  * printk("hello\n");
  * printk("%d\n", ret);
@@ -189,51 +194,60 @@ struct debug_capture_msg {
 			trace_printk(____fmt, sizeof(____fmt),	\
 				     ##__VA_ARGS__);		\
 		})
-
+#else
+# define printk(fmt, ...)					\
+		do { } while (0)
+#endif
 
 static __always_inline void cilium_dbg(struct __ctx_buff *ctx, __u8 type,
 				       __u32 arg1, __u32 arg2)
 {
-	struct debug_msg msg = {
-		__notify_common_hdr(CILIUM_NOTIFY_DBG_MSG, type),
-		.arg1	= arg1,
-		.arg2	= arg2,
-	};
+	if (cilium_should_debug()) {
+		struct debug_msg msg = {
+			__notify_common_hdr(CILIUM_NOTIFY_DBG_MSG, type),
+			.arg1	= arg1,
+			.arg2	= arg2,
+		};
 
-	ctx_event_output(ctx, &cilium_events, BPF_F_CURRENT_CPU,
-			 &msg, sizeof(msg));
+		ctx_event_output(ctx, &cilium_events, BPF_F_CURRENT_CPU,
+				 &msg, sizeof(msg));
+	}
 }
 
 static __always_inline void cilium_dbg3(struct __ctx_buff *ctx, __u8 type,
 					__u32 arg1, __u32 arg2, __u32 arg3)
 {
-	struct debug_msg msg = {
-		__notify_common_hdr(CILIUM_NOTIFY_DBG_MSG, type),
-		.arg1	= arg1,
-		.arg2	= arg2,
-		.arg3	= arg3,
-	};
+	if (cilium_should_debug()) {
+		struct debug_msg msg = {
+			__notify_common_hdr(CILIUM_NOTIFY_DBG_MSG, type),
+			.arg1	= arg1,
+			.arg2	= arg2,
+			.arg3	= arg3,
+		};
 
-	ctx_event_output(ctx, &cilium_events, BPF_F_CURRENT_CPU,
-			 &msg, sizeof(msg));
+		ctx_event_output(ctx, &cilium_events, BPF_F_CURRENT_CPU,
+				 &msg, sizeof(msg));
+	}
 }
 
 
 static __always_inline void cilium_dbg_capture2(struct __ctx_buff *ctx, __u8 type,
 						__u32 arg1, __u32 arg2)
 {
-	__u64 ctx_len = ctx_full_len(ctx);
-	__u64 cap_len = min_t(__u64, TRACE_PAYLOAD_LEN, ctx_len);
-	struct debug_capture_msg msg = {
-		__notify_common_hdr(CILIUM_NOTIFY_DBG_CAPTURE, type),
-		__notify_pktcap_hdr((__u32)ctx_len, (__u16)cap_len, NOTIFY_CAPTURE_VER),
-		.arg1	= arg1,
-		.arg2	= arg2,
-	};
+	if (cilium_should_debug()) {
+		__u64 ctx_len = ctx_full_len(ctx);
+		__u64 cap_len = min_t(__u64, TRACE_PAYLOAD_LEN, ctx_len);
+		struct debug_capture_msg msg = {
+			__notify_common_hdr(CILIUM_NOTIFY_DBG_CAPTURE, type),
+			__notify_pktcap_hdr((__u32)ctx_len, (__u16)cap_len, NOTIFY_CAPTURE_VER),
+			.arg1	= arg1,
+			.arg2	= arg2,
+		};
 
-	ctx_event_output(ctx, &cilium_events,
-			 (cap_len << 32) | BPF_F_CURRENT_CPU,
-			 &msg, sizeof(msg));
+		ctx_event_output(ctx, &cilium_events,
+				 (cap_len << 32) | BPF_F_CURRENT_CPU,
+				 &msg, sizeof(msg));
+	}
 }
 
 static __always_inline void cilium_dbg_capture(struct __ctx_buff *ctx, __u8 type,
@@ -241,34 +255,3 @@ static __always_inline void cilium_dbg_capture(struct __ctx_buff *ctx, __u8 type
 {
 	cilium_dbg_capture2(ctx, type, arg1, 0);
 }
-#else
-# define printk(fmt, ...)					\
-		do { } while (0)
-
-static __always_inline
-void cilium_dbg(struct __ctx_buff *ctx __maybe_unused, __u8 type __maybe_unused,
-		__u32 arg1 __maybe_unused, __u32 arg2 __maybe_unused)
-{
-}
-
-static __always_inline
-void cilium_dbg3(struct __ctx_buff *ctx __maybe_unused,
-		 __u8 type __maybe_unused, __u32 arg1 __maybe_unused,
-		 __u32 arg2 __maybe_unused, __u32 arg3 __maybe_unused)
-{
-}
-
-static __always_inline
-void cilium_dbg_capture(struct __ctx_buff *ctx __maybe_unused,
-			__u8 type __maybe_unused, __u32 arg1 __maybe_unused)
-{
-}
-
-static __always_inline
-void cilium_dbg_capture2(struct __ctx_buff *ctx __maybe_unused,
-			 __u8 type __maybe_unused, __u32 arg1 __maybe_unused,
-			 __u32 arg2 __maybe_unused)
-{
-}
-
-#endif

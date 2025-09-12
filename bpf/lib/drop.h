@@ -81,7 +81,7 @@ int tail_drop_notify(struct __ctx_buff *ctx)
 	};
 	struct drop_notify msg;
 
-	if (EVENTS_MAP_RATE_LIMIT > 0) {
+	if (EVENTS_MAP_RATE_LIMIT > 0 && ip_trace_id == 0) {
 		settings.bucket_size = EVENTS_MAP_BURST_LIMIT;
 		settings.tokens_per_topup = EVENTS_MAP_RATE_LIMIT;
 		if (!ratelimit_check_and_take(&rkey, &settings))
