@@ -614,6 +614,15 @@ func (legacy *legacyOnLeader) onStart(ctx cell.HookContext) error {
 	)
 	watcherLogger := legacy.logger.With(logfields.LogSubsys, "watchers")
 
+	if legacy.clientset.IsEnabled() {
+		gkeWliLabeler := operatorWatchers.NewGKEWliLabeler(legacy.clientset, watcherLogger)
+		legacy.wg.Add(1)
+		go func() {
+			defer legacy.wg.Done()
+			gkeWliLabeler.Run(legacy.ctx.Done())
+		}()
+	}
+
 	switch ipamMode := option.Config.IPAM; ipamMode {
 	case ipamOption.IPAMAzure,
 		ipamOption.IPAMENI,
