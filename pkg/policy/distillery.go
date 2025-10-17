@@ -92,7 +92,8 @@ func (cache *policyCache) delete(identity *identityPkg.Identity) bool {
 // Returns whether the cache was updated, or an error.
 //
 // Must be called with repo.Mutex held for reading.
-func (cache *policyCache) updateSelectorPolicy(identity *identityPkg.Identity, endpointID uint64) (*selectorPolicy, bool, error) {
+func (cache *policyCache) updateSelectorPolicy(identity *identityPkg.Identity, endpointID uint64, nodeLabels map[string]string, force bool) (*selectorPolicy, bool, error) {
+	cache.repo.logger.Debug("updateSelectorPolicy: entered function", "endpointID", endpointID)
 	cip := cache.lookupOrCreate(identity)
 
 	// As long as UpdatePolicy() is triggered from endpoint
@@ -108,12 +109,16 @@ func (cache *policyCache) updateSelectorPolicy(identity *identityPkg.Identity, e
 	defer cip.Unlock()
 
 	// Don't resolve policy if it was already done for this or later revision.
-	if selPolicy := cip.getPolicy(); selPolicy != nil && selPolicy.Revision >= cache.repo.GetRevision() {
-		return selPolicy, false, nil
+	// However, if the GKE metadata server label is present, we must always re-evaluate
+	// the policy to ensure the egress deny rule is applied or removed correctly.
+	if !force {
+		if selPolicy := cip.getPolicy(); selPolicy != nil && selPolicy.Revision >= cache.repo.GetRevision() {
+			return selPolicy, false, nil
+		}
 	}
 
 	// Resolve the policies, which could fail
-	selPolicy, err := cache.repo.resolvePolicyLocked(identity)
+	selPolicy, err := cache.repo.resolvePolicyLocked(identity, nodeLabels)
 	if err != nil {
 		return nil, false, err
 	}

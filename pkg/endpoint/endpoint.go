@@ -467,6 +467,12 @@ type Endpoint struct {
 	NetNsCookie uint64
 
 	ctMapGC ctmap.GCRunner
+
+	// nodeLabels are the labels assigned to the node hosting the endpoint.
+	nodeLabels map[string]string
+
+	// Force regen because of nodeLabels
+	forceNodeLabelPolicyRegen bool
 }
 
 // GetPolicyNames returns the policy names for this endpoint.
@@ -607,44 +613,46 @@ func (e *Endpoint) waitForProxyCompletions(proxyWaitGroup *completion.WaitGroup)
 
 func createEndpoint(logger *slog.Logger, dnsRulesAPI DNSRulesAPI, epBuildQueue EndpointBuildQueue, loader datapath.Loader, orchestrator datapath.Orchestrator, compilationLock datapath.CompilationLock, bandwidthManager datapath.BandwidthManager, ipTablesManager datapath.IptablesManager, identityManager identitymanager.IDManager, monitorAgent monitoragent.Agent, policyMapFactory policymap.Factory, policyRepo policy.PolicyRepository, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner, kvstoreSyncher *ipcache.IPIdentitySynchronizer, ID uint16, ifName string, wgCfg wgTypes.WireguardConfig, ipsecCfg datapath.IPsecConfig, policyDebugLog io.Writer) *Endpoint {
 	ep := &Endpoint{
-		dnsRulesAPI:        dnsRulesAPI,
-		epBuildQueue:       epBuildQueue,
-		loader:             loader,
-		orchestrator:       orchestrator,
-		compilationLock:    compilationLock,
-		bandwidthManager:   bandwidthManager,
-		ipTablesManager:    ipTablesManager,
-		identityManager:    identityManager,
-		monitorAgent:       monitorAgent,
-		wgConfig:           wgCfg,
-		ipsecConfig:        ipsecCfg,
-		policyMapFactory:   policyMapFactory,
-		policyRepo:         policyRepo,
-		namedPortsGetter:   namedPortsGetter,
-		ID:                 ID,
-		createdAt:          time.Now(),
-		proxy:              proxy,
-		ifName:             ifName,
-		labels:             labels.NewOpLabels(),
-		Options:            option.NewIntOptions(&EndpointMutableOptionLibrary),
-		DNSRules:           nil,
-		DNSRulesV2:         nil,
-		DNSHistory:         fqdn.NewDNSCacheWithLimit(option.Config.ToFQDNsMinTTL, option.Config.ToFQDNsMaxIPsPerHost),
-		DNSZombies:         fqdn.NewDNSZombieMappings(logger, option.Config.ToFQDNsMaxDeferredConnectionDeletes, option.Config.ToFQDNsMaxIPsPerHost),
-		state:              "",
-		status:             NewEndpointStatus(),
-		hasBPFProgram:      make(chan struct{}),
-		desiredPolicy:      policy.NewEndpointPolicy(logger, policyRepo),
-		controllers:        controller.NewManager(),
-		regenFailedChan:    make(chan struct{}, 1),
-		allocator:          allocator,
-		logLimiter:         logging.NewLimiter(10*time.Second, 3), // 1 log / 10 secs, burst of 3
-		noTrackPort:        0,
-		properties:         map[string]any{},
-		ctMapGC:            ctMapGC,
-		kvstoreSyncher:     kvstoreSyncher,
-		policyDebugLog:     policyDebugLog,
-		forcePolicyCompute: true,
+		dnsRulesAPI:               dnsRulesAPI,
+		epBuildQueue:              epBuildQueue,
+		loader:                    loader,
+		orchestrator:              orchestrator,
+		compilationLock:           compilationLock,
+		bandwidthManager:          bandwidthManager,
+		ipTablesManager:           ipTablesManager,
+		identityManager:           identityManager,
+		monitorAgent:              monitorAgent,
+		wgConfig:                  wgCfg,
+		ipsecConfig:               ipsecCfg,
+		policyMapFactory:          policyMapFactory,
+		policyRepo:                policyRepo,
+		namedPortsGetter:          namedPortsGetter,
+		ID:                        ID,
+		createdAt:                 time.Now(),
+		proxy:                     proxy,
+		ifName:                    ifName,
+		labels:                    labels.NewOpLabels(),
+		Options:                   option.NewIntOptions(&EndpointMutableOptionLibrary),
+		DNSRules:                  nil,
+		DNSRulesV2:                nil,
+		DNSHistory:                fqdn.NewDNSCacheWithLimit(option.Config.ToFQDNsMinTTL, option.Config.ToFQDNsMaxIPsPerHost),
+		DNSZombies:                fqdn.NewDNSZombieMappings(logger, option.Config.ToFQDNsMaxDeferredConnectionDeletes, option.Config.ToFQDNsMaxIPsPerHost),
+		state:                     "",
+		status:                    NewEndpointStatus(),
+		hasBPFProgram:             make(chan struct{}),
+		desiredPolicy:             policy.NewEndpointPolicy(logger, policyRepo),
+		controllers:               controller.NewManager(),
+		regenFailedChan:           make(chan struct{}, 1),
+		allocator:                 allocator,
+		logLimiter:                logging.NewLimiter(10*time.Second, 3), // 1 log / 10 secs, burst of 3
+		noTrackPort:               0,
+		properties:                map[string]any{},
+		ctMapGC:                   ctMapGC,
+		kvstoreSyncher:            kvstoreSyncher,
+		policyDebugLog:            policyDebugLog,
+		forcePolicyCompute:        true,
+		nodeLabels:                map[string]string{},
+		forceNodeLabelPolicyRegen: false,
 	}
 
 	ep.initialEnvoyPolicyComputed = make(chan struct{})
@@ -1434,6 +1442,49 @@ func (e *Endpoint) SetState(toState State, reason string) bool {
 	defer e.unlock()
 
 	return e.setState(toState, reason)
+}
+
+// SetNodeLabels sets the node labels for the endpoint.
+func (e *Endpoint) SetNodeLabels(nodeLabels map[string]string) {
+	e.unconditionalLock()
+	e.getLogger().Debug("SetNodeLabels: entered function", logfields.NodeLabels, nodeLabels)
+
+	oldNodeLabels := e.nodeLabels
+	e.nodeLabels = nodeLabels
+
+	e.getLogger().Debug("SetNodeLabels: comparing node labels", "old", oldNodeLabels, "new", e.nodeLabels)
+
+	oldHasConfig := oldNodeLabels["iam.gke.io/gke-metadata-server-enabled"] == "true"
+	newHasConfig := e.nodeLabels["iam.gke.io/gke-metadata-server-enabled"] == "true"
+
+	// We trigger a regeneration if the special label was added or removed.
+	shouldRegenerate := oldHasConfig != newHasConfig
+	e.getLogger().Debug("SetNodeLabels: label comparison result", "oldHasConfig", oldHasConfig, "newHasConfig", newHasConfig, "shouldRegenerate", shouldRegenerate)
+
+	var regenMetadata *regeneration.ExternalRegenerationMetadata
+	regenerationQueued := false
+	if shouldRegenerate {
+		e.forcePolicyComputation() // Force policy re-evaluation
+		e.forceNodeLabelPolicyRegen = true
+		reason := "iam.gke.io/gke-metadata-server-enabled label changed on node"
+		regenMetadata = &regeneration.ExternalRegenerationMetadata{
+			Reason:            reason,
+			RegenerationLevel: regeneration.RegenerateWithoutDatapath,
+		}
+		regenerationQueued = e.setRegenerateStateLocked(regenMetadata)
+		if !regenerationQueued {
+			e.getLogger().Warn("SetNodeLabels: Failed to set regeneration state, regeneration will be skipped", "endpointID", e.ID, "currentState", e.state)
+		}
+	}
+
+	e.unlock() // IMPORTANT: Unlock before calling Regenerate.
+
+	if regenerationQueued {
+		e.getLogger().Info("Forcing policy recalculation for endpoint due to iam.gke.io/gke-metadata-server-enabled label change on node")
+		e.Regenerate(regenMetadata)
+	} else {
+		e.getLogger().Debug("SetNodeLabels: no policy recalculation triggered")
+	}
 }
 
 // SetMac modifies the endpoint's mac.

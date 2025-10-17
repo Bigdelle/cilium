@@ -28,6 +28,7 @@ import (
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy/api"
 	"github.com/cilium/cilium/pkg/policy/types"
+	policytypes "github.com/cilium/cilium/pkg/policy/types"
 	"github.com/cilium/cilium/pkg/policy/utils"
 	"github.com/cilium/cilium/pkg/spanstat"
 )
@@ -43,7 +44,7 @@ type PolicyRepository interface {
 	// This is used to skip policy calculation when a certain revision delta is
 	// known to not affect the given identity. Pass a skipRevision of 0 to force
 	// calculation.
-	GetSelectorPolicy(id *identity.Identity, skipRevision uint64, stats GetPolicyStatistics, endpointID uint64) (SelectorPolicy, uint64, error)
+	GetSelectorPolicy(id *identity.Identity, skipRevision uint64, stats GetPolicyStatistics, endpointID uint64, nodeLabels map[string]string, force bool) (SelectorPolicy, uint64, error)
 
 	// GetPolicySnapshot returns a map of all the SelectorPolicies in the repository.
 	GetPolicySnapshot() map[identity.NumericIdentity]SelectorPolicy
@@ -299,7 +300,8 @@ func (p *Repository) GetRulesList() *models.Policy {
 // cannot be generated due to conflicts at L4 or L7, returns an error.
 //
 // Must be performed while holding the Repository lock.
-func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*selectorPolicy, error) {
+func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity, nodeLabels map[string]string) (*selectorPolicy, error) {
+	p.logger.Debug("resolvePolicyLocked: entered function", "securityIdentity", securityIdentity.ID)
 	// First obtain whether policy applies in both traffic directions, as well
 	// as list of rules which actually select this endpoint. This allows us
 	// to not have to iterate through the entire rule list multiple times and
@@ -307,7 +309,11 @@ func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*
 	// protocol layer, which is quite costly in terms of performance.
 	ingressEnabled, egressEnabled,
 		hasIngressDefaultDeny, hasEgressDefaultDeny,
-		matchingRules := p.computePolicyEnforcementAndRules(securityIdentity)
+		matchingRules := p.computePolicyEnforcementAndRules(securityIdentity, nodeLabels)
+
+	for i, rule := range matchingRules {
+		p.logger.Debug("resolvePolicyLocked: processing matchingRule", "index", i, "rule", rule.String(), "deny", rule.Deny, "l3", rule.L3)
+	}
 
 	calculatedPolicy := &selectorPolicy{
 		Revision:             p.GetRevision(),
@@ -353,14 +359,17 @@ func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*
 // the set of labels of the given security identity.
 //
 // Must be called with repo mutex held for reading.
-func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity.Identity) (
+func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity.Identity, nodeLabels map[string]string) (
 	ingress, egress, hasIngressDefaultDeny, hasEgressDefaultDeny bool,
 	matchingRules ruleSlice,
 ) {
+	p.logger.Debug("computePolicyEnforcementAndRules: entered function", "securityIdentity", securityIdentity.ID, "nodeLabels", nodeLabels)
 	lbls := securityIdentity.LabelArray
+	matchingRules = []*rule{}
 
 	// Check if policy enforcement should be enabled at the daemon level.
 	if lbls.Has(labels.IDNameHost) && !option.Config.EnableHostFirewall {
+		p.logger.Debug("return 1")
 		return false, false, false, false, nil
 	}
 
@@ -369,10 +378,10 @@ func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity
 	// enforcement for the endpoint. We don't care about returning any
 	// rules that match.
 	if policyMode == option.NeverEnforce {
+		p.logger.Debug("return 2")
 		return false, false, false, false, nil
 	}
 
-	matchingRules = []*rule{}
 	// Match cluster-wide rules
 	for rKey := range p.rulesByNamespace[""] {
 		r := p.rules[rKey]
@@ -396,6 +405,7 @@ func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity
 	// If the endpoint has the reserved:init label, i.e. if it has not yet
 	// received any labels, always enforce policy (default deny).
 	if policyMode == option.AlwaysEnforce || lbls.Has(labels.IDNameInit) {
+		p.logger.Debug("return 3")
 		return true, true, true, true, matchingRules
 	}
 
@@ -444,6 +454,44 @@ func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity
 		matchingRules = append(matchingRules, wildcardRule(securityIdentity.LabelArray, false /*egress*/))
 	}
 
+	// If the node has the GKE metadata server enabled label.
+	// add a default egress rule to deny traffic to 169.254.169.254/32.
+	if val, ok := nodeLabels["iam.gke.io/gke-metadata-server-enabled"]; ok && val == "true" {
+		p.logger.Debug("GKE metadata server enabled, synthesizing egress deny rule for 169.254.169.254/32", logfields.Identity, securityIdentity)
+		egress = true
+
+		// 1. Explicitly deny traffic to the target CIDR range.
+		denyCIDRRule := api.CIDRRuleSlice{{
+			Cidr: api.CIDR("10.96.0.0/12"),
+		}}
+		denyL3 := policytypes.ToPeerSelectorSlice(denyCIDRRule.GetAsEndpointSelectors())
+		denyRule := &rule{
+			PolicyEntry: types.PolicyEntry{
+				Ingress: false, // Egress
+				Deny:    true,
+				Subject: api.NewESFromLabels(securityIdentity.LabelArray...),
+				L3:      denyL3,
+			},
+		}
+
+		// 2. Explicitly allow all other traffic.
+		allowCIDRRule := api.CIDRRuleSlice{{
+			Cidr: api.CIDR("0.0.0.0/0"),
+		}}
+		allowL3 := policytypes.ToPeerSelectorSlice(allowCIDRRule.GetAsEndpointSelectors())
+		allowRule := &rule{
+			PolicyEntry: types.PolicyEntry{
+				Ingress: false, // Egress
+				Subject: api.NewESFromLabels(securityIdentity.LabelArray...),
+				L3:      allowL3,
+			},
+		}
+
+		matchingRules = append(matchingRules, denyRule, allowRule)
+	} else {
+		p.logger.Debug("GKE metadata server not enabled, skipping egress deny rule for", logfields.Identity, securityIdentity)
+	}
+
 	return
 }
 
@@ -464,7 +512,8 @@ func wildcardRule(lbls labels.LabelArray, ingress bool) *rule {
 // This is used to skip policy calculation when a certain revision delta is
 // known to not affect the given identity. Pass a skipRevision of 0 to force
 // calculation.
-func (r *Repository) GetSelectorPolicy(id *identity.Identity, skipRevision uint64, stats GetPolicyStatistics, endpointID uint64) (SelectorPolicy, uint64, error) {
+func (r *Repository) GetSelectorPolicy(id *identity.Identity, skipRevision uint64, stats GetPolicyStatistics, endpointID uint64, nodeLabels map[string]string, force bool) (SelectorPolicy, uint64, error) {
+	r.logger.Debug("GetSelectorPolicy: entered function", "endpointID", endpointID, "skipRevision", skipRevision, "force", force)
 	stats.WaitingForPolicyRepository().Start()
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
@@ -481,7 +530,7 @@ func (r *Repository) GetSelectorPolicy(id *identity.Identity, skipRevision uint6
 	stats.SelectorPolicyCalculation().Start()
 	// This may call back in to the (locked) repository to generate the
 	// selector policy
-	sp, updated, err := r.policyCache.updateSelectorPolicy(id, endpointID)
+	sp, updated, err := r.policyCache.updateSelectorPolicy(id, endpointID, nodeLabels, force)
 	stats.SelectorPolicyCalculation().EndError(err)
 
 	// If we hit cache, reset the statistics.

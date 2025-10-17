@@ -748,6 +748,13 @@ func (mgr *endpointManager) AddEndpoint(ep *endpoint.Endpoint) (err error) {
 		logfields.CEPName:     ep.GetK8sNamespaceAndCEPName(),
 	})
 
+	if ln, err := mgr.localNodeStore.Get(context.Background()); err != nil {
+		mgr.logger.Warn("Failed to get local node labels", logfields.Error, err)
+	} else {
+		mgr.logger.Debug("Adding node labels to endpoint")
+		ep.SetNodeLabels(ln.Labels)
+	}
+
 	err = mgr.expose(ep)
 	if err != nil {
 		return err

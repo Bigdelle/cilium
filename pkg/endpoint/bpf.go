@@ -374,6 +374,7 @@ func (e *Endpoint) removeOldRedirects(desiredRedirects, realizedRedirects map[st
 // Whether the new state dir is populated with all new BPF state files,
 // and an error if something failed.
 func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint64, reterr error) {
+	e.getLogger().Debug("regenerateBPF: entered function", "endpointID", e.ID)
 	var err error
 
 	stats := &regenContext.Stats
@@ -625,6 +626,7 @@ func (e *Endpoint) realizeBPFState(regenContext *regenerationContext) (err error
 //
 // Returns whether the headerfile changed and/or an error.
 func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (preCompilationError error) {
+	e.getLogger().Debug("runPreCompilationSteps: entered function", "endpointID", e.ID)
 	stats := &regenContext.Stats
 	datapathRegenCtxt := regenContext.datapathRegenerationContext
 

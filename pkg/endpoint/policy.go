@@ -175,6 +175,7 @@ func (res *policyGenerateResult) release(logger *slog.Logger) {
 // Stores the result in 'datapathRegenCtxt.policyResult' that should be passed to setDesiredPolicy
 // after the endpoint's write lock has been acquired, returns err if recomputing policy failed.
 func (e *Endpoint) regeneratePolicy(stats *regenerationStatistics, datapathRegenCtxt *datapathRegenerationContext) error {
+	e.getLogger().Debug("regeneratePolicy: entered function", "forcePolicyCompute", e.forcePolicyCompute, "nodeLabels", e.nodeLabels)
 	var (
 		err error
 		rf  revert.RevertFunc
@@ -195,6 +196,9 @@ func (e *Endpoint) regeneratePolicy(stats *regenerationStatistics, datapathRegen
 
 	// Copy out some values we care about, then unlock
 	forcePolicyCompute := e.forcePolicyCompute
+	forceNodeLabelPolicyRegen := e.forceNodeLabelPolicyRegen
+	e.getLogger().Debug("regeneratePolicy: read force flags", "forcePolicyCompute", forcePolicyCompute, "forceNodeLabelPolicyRegen", forceNodeLabelPolicyRegen)
+	e.forceNodeLabelPolicyRegen = false
 	securityIdentity := e.SecurityIdentity
 
 	// We are computing policy; set this to false.
@@ -217,7 +221,7 @@ func (e *Endpoint) regeneratePolicy(stats *regenerationStatistics, datapathRegen
 	}
 
 	var selectorPolicy policy.SelectorPolicy
-	selectorPolicy, result.policyRevision, err = e.policyRepo.GetSelectorPolicy(securityIdentity, skipPolicyRevision, stats, e.GetID())
+	selectorPolicy, result.policyRevision, err = e.policyRepo.GetSelectorPolicy(securityIdentity, skipPolicyRevision, stats, e.GetID(), e.nodeLabels, forceNodeLabelPolicyRegen)
 	if err != nil {
 		e.getLogger().Warn("Failed to calculate SelectorPolicy", logfields.Error, err)
 		return err
@@ -378,6 +382,7 @@ func (e *Endpoint) updateAndOverrideEndpointOptions(opts option.OptionMap) (opts
 
 // Called with e.mutex UNlocked
 func (e *Endpoint) regenerate(ctx *regenerationContext) (retErr error) {
+	e.getLogger().Debug("regenerate: entered function", "endpointID", e.ID, "reason", ctx.Reason)
 	var revision uint64
 	var err error
 
