@@ -6,6 +6,7 @@ package ipcachecell
 import (
 	"context"
 	"log/slog"
+	"net/netip"
 
 	"github.com/cilium/hive/cell"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/ipcache/api"
 	"github.com/cilium/cilium/pkg/k8s/synced"
+	"github.com/cilium/cilium/pkg/labels"
 	policycell "github.com/cilium/cilium/pkg/policy/cell"
 )
 
@@ -74,6 +76,12 @@ func newIPCache(params ipCacheParams) *ipcache.IPCache {
 			return ipc.Shutdown()
 		},
 	})
+
+	// Fake the label for the GCE metadata server IP.
+	if ip, err := netip.ParseAddr("169.254.169.254"); err == nil {
+		params.Logger.Debug("Faking 'deny=true' label for IP 169.254.169.254")
+		ipc.FakeIPLabel(ip, labels.NewLabel("deny", "true", labels.LabelSourceK8s))
+	}
 
 	return ipc
 }

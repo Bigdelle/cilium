@@ -900,6 +900,19 @@ func (ipc *IPCache) LookupByHostRLocked(hostIPv4, hostIPv6 net.IP) (cidrs []net.
 	return cidrs
 }
 
+// FakeIPLabel associates a label with an IP address in the IPCache.
+// This is intended for testing and debugging purposes.
+func (ipc *IPCache) FakeIPLabel(ip netip.Addr, label labels.Label) {
+	prefix, err := ip.Prefix(ip.BitLen())
+	if err != nil {
+		return
+	}
+	prefixCluster := cmtypes.NewPrefixCluster(prefix, 0)
+	lbls := labels.Labels{label.Key: label}
+	ipc.UpsertMetadata(prefixCluster, source.LocalAPI, "faked-label", lbls)
+	ipc.TriggerLabelInjection()
+}
+
 // Equal returns true if two K8sMetadata pointers contain the same data or are
 // both nil.
 func (m *K8sMetadata) Equal(o *K8sMetadata) bool {

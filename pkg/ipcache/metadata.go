@@ -679,6 +679,7 @@ func (ipc *IPCache) doInjectLabels(ctx context.Context, modifiedPrefixes []cmtyp
 //     already has the same IP -> identity entry in the map), immediately release
 //     the reference.
 func (ipc *IPCache) resolveIdentity(prefix cmtypes.PrefixCluster, info *resourceInfo) (*identity.Identity, bool, error) {
+	ipc.logger.Info("Resolving identity", "prefix", prefix.String(), "labels", info.ToLabels())
 	// Override identities always take precedence
 	if info.IdentityOverride() {
 		id, isNew, err := ipc.IdentityAllocator.AllocateLocalIdentity(info.ToLabels(), false, identity.InvalidIdentity)
@@ -687,10 +688,11 @@ func (ipc *IPCache) resolveIdentity(prefix cmtypes.PrefixCluster, info *resource
 				"Failed to allocate new identity for prefix's IdentityOverrideLabels.",
 				logfields.Error, err,
 				logfields.ClusterID, prefix.ClusterID(),
-				logfields.IPAddr, prefix,
+				logfields.IPAddr, prefix.String(),
 				logfields.Labels, info.ToLabels(),
 			)
 		}
+		ipc.logger.Info("Resolved identity", "prefix", prefix.String(), "identity", id.ID, "isNew", isNew, "error", err)
 		return id, isNew, err
 	}
 
@@ -723,6 +725,7 @@ func (ipc *IPCache) resolveIdentity(prefix cmtypes.PrefixCluster, info *resource
 		// that resolve to the reserved:host identity, otherwise we can
 		// flap identities labels depending on which prefix writes first. See GH-28259.
 		i := ipc.updateReservedHostLabels(prefix.AsPrefix(), lbls)
+		ipc.logger.Info("Resolved host identity", "prefix", prefix.String(), "identity", i.ID)
 		return i, false, nil
 	}
 
@@ -734,11 +737,12 @@ func (ipc *IPCache) resolveIdentity(prefix cmtypes.PrefixCluster, info *resource
 		ipc.logger.Warn(
 			"Failed to allocate new identity for prefix's Labels.",
 			logfields.Error, err,
-			logfields.IPAddr, prefix,
+			logfields.IPAddr, prefix.String(),
 			logfields.Labels, lbls,
 		)
 		return nil, false, err
 	}
+	ipc.logger.Info("Resolved identity", "prefix", prefix.String(), "identity", id.ID, "isNew", isNew, "error", err)
 	return id, isNew, err
 }
 
@@ -798,7 +802,15 @@ func resolveLabels(lbls labels.Labels, prefix cmtypes.PrefixCluster) {
 
 	// add world if not in-cluster.
 	if !isInCluster {
-		lbls.AddWorldLabel(prefix.AsPrefix().Addr())
+		if prefix.String() == "169.254.169.254/32" {
+			lbls["true"] = labels.Label{Source: "true", Key: "deny"}
+			lbls.Remove(labels.LabelWorld)
+			lbls.Remove(labels.LabelWorldIPv4)
+			lbls.Remove(labels.LabelWorldIPv6)
+		} else {
+			lbls.AddWorldLabel(prefix.AsPrefix().Addr())
+		}
+
 	}
 }
 

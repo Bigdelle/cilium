@@ -448,48 +448,31 @@ func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity
 		matchingRules = append(matchingRules, wildcardRule(securityIdentity.LabelArray, true /*ingress*/))
 	}
 
-	// Same for egress -- synthesize a wildcard rule
-	if !hasEgressDefaultDeny && egress {
-		p.logger.Debug("Only default-allow policies, synthesizing egress wildcard-allow rule", logfields.Identity, securityIdentity)
-		matchingRules = append(matchingRules, wildcardRule(securityIdentity.LabelArray, false /*egress*/))
-	}
-
 	// If the node has the GKE metadata server enabled label.
-	// add a default egress rule to deny traffic to 169.254.169.254/32.
+	// add a default egress rule to deny traffic to endpoints with label deny=true.
 	if val, ok := nodeLabels["iam.gke.io/gke-metadata-server-enabled"]; ok && val == "true" {
-		p.logger.Debug("GKE metadata server enabled, synthesizing egress deny rule for 169.254.169.254/32", logfields.Identity, securityIdentity)
+		p.logger.Debug("GKE metadata server enabled, synthesizing egress deny rule for deny=true label", logfields.Identity, securityIdentity)
 		egress = true
 
-		// 1. Explicitly deny traffic to the target CIDR range.
-		denyCIDRRule := api.CIDRRuleSlice{{
-			Cidr: api.CIDR("10.96.0.0/12"),
-		}}
-		denyL3 := policytypes.ToPeerSelectorSlice(denyCIDRRule.GetAsEndpointSelectors())
+		// Explicitly deny traffic to endpoints with the label deny=true.
 		denyRule := &rule{
 			PolicyEntry: types.PolicyEntry{
 				Ingress: false, // Egress
 				Deny:    true,
 				Subject: api.NewESFromLabels(securityIdentity.LabelArray...),
-				L3:      denyL3,
+				L3:      policytypes.ToPeerSelectorSlice(api.EndpointSelectorSlice{api.NewESFromLabels(labels.NewLabel("deny", "true", labels.LabelSourceK8s))}),
 			},
 		}
 
-		// 2. Explicitly allow all other traffic.
-		allowCIDRRule := api.CIDRRuleSlice{{
-			Cidr: api.CIDR("0.0.0.0/0"),
-		}}
-		allowL3 := policytypes.ToPeerSelectorSlice(allowCIDRRule.GetAsEndpointSelectors())
-		allowRule := &rule{
-			PolicyEntry: types.PolicyEntry{
-				Ingress: false, // Egress
-				Subject: api.NewESFromLabels(securityIdentity.LabelArray...),
-				L3:      allowL3,
-			},
-		}
-
-		matchingRules = append(matchingRules, denyRule, allowRule)
+		matchingRules = append(matchingRules, denyRule)
 	} else {
 		p.logger.Debug("GKE metadata server not enabled, skipping egress deny rule for", logfields.Identity, securityIdentity)
+	}
+
+	// Same for egress -- synthesize a wildcard rule
+	if !hasEgressDefaultDeny && egress {
+		p.logger.Debug("Only default-allow policies, synthesizing egress wildcard-allow rule", logfields.Identity, securityIdentity)
+		matchingRules = append(matchingRules, wildcardRule(securityIdentity.LabelArray, false /*egress*/))
 	}
 
 	return
