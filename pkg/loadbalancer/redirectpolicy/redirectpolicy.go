@@ -118,6 +118,8 @@ type LocalRedirectPolicy struct {
 	// ForceRedirectOrDrop is the flag that indicates whether traffic should be redirected
 	// even if no backend pods are found.
 	ForceRedirectOrDrop bool
+	// NodeSelector is a selector to determine if the policy applies to the node.
+	NodeSelector api.EndpointSelector
 }
 
 func (lrp *LocalRedirectPolicy) TableHeader() []string {
@@ -333,6 +335,11 @@ func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespa
 	// Get an EndpointSelector from the passed policy labelSelector for optimized matching.
 	sel := policytypes.NewLabelSelector(api.NewESFromK8sLabelSelector(labels.LabelSourceK8sKeyPrefix, &redirectTo.LocalEndpointSelector))
 
+	var nodeSelector api.EndpointSelector
+	if spec.NodeSelector != nil {
+		nodeSelector = api.NewESFromK8sLabelSelector(labels.LabelSourceK8sKeyPrefix, spec.NodeSelector)
+	}
+
 	return &LocalRedirectPolicy{
 		UID:                     uid,
 		ServiceID:               k8sSvc,
@@ -346,5 +353,6 @@ func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespa
 		SkipRedirectFromBackend: spec.SkipRedirectFromBackend,
 		ForceRedirectOrDrop:     spec.ForceRedirectOrDrop,
 		ID:                      lb.NewServiceName(namespace, name),
+		NodeSelector:            nodeSelector,
 	}, nil
 }
