@@ -147,6 +147,13 @@ type RedirectBackend struct {
 	//
 	// +kubebuilder:validation:Required
 	ToPorts []PortInfo `json:"toPorts"`
+
+	// ForceRedirect indicates whether traffic matching RedirectFrontend should be
+	// redirected even if no backends match LocalEndpointSelector.
+	//
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	ForceRedirect bool `json:"forceRedirect,omitempty"`
 }
 
 // CiliumLocalRedirectPolicySpec specifies the configurations for redirecting traffic
@@ -190,6 +197,12 @@ type CiliumLocalRedirectPolicySpec struct {
 	//
 	// +kubebuilder:validation:Optional
 	Description string `json:"description,omitempty"`
+
+	// NodeSelector selects a group of nodes where this policy is applicable.
+	// If empty, the policy applies to all nodes.
+	//
+	// +kubebuilder:validation:Optional
+	NodeSelector *slim_metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
 
 // CiliumLocalRedirectPolicyStatus is the status of a Local Redirect Policy.

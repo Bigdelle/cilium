@@ -1,0 +1,107 @@
+#! --lrp-address-matcher-cidrs=169.254.169.0/24
+
+hive start
+
+# Update local node with a label
+localnode/update kubernetes.io/hostname=testnode
+
+# Add a pod
+k8s/add pod.yaml
+
+# Add LRP with NodeSelector and ForceRedirect
+k8s/add lrp.yaml
+
+# Wait for the frontend.
+db/show frontends
+* stdout '169.254.169.254:8080/TCP.*10.244.2.1:80/TCP.*Done'
+
+# Update local node to mismatch
+localnode/update kubernetes.io/hostname=othernode
+
+# Frontend should be gone (policy unapplied)
+db/show frontends
+* stdout 'Address.*Type.*ServiceName.*Backends.*RedirectTo.*Status'
+!* stdout '169.254.169.254'
+
+# Update local node to match again
+localnode/update kubernetes.io/hostname=testnode
+
+# Frontend should be back
+db/show frontends
+* stdout '169.254.169.254:8080/TCP.*10.244.2.1:80/TCP.*Done'
+
+# Delete the pod
+k8s/delete pod.yaml
+
+# Frontend should still exist, pointing to dummy backend
+db/show frontends
+* stdout '169.254.169.254:8080/TCP.*169.254.169.254:80/TCP.*Done'
+
+# Update LRP to disable ForceRedirect
+replace 'forceRedirect: true' 'forceRedirect: false' lrp.yaml
+k8s/update lrp.yaml
+
+# Frontend should be gone (no backends and no force redirect)
+db/show frontends
+* stdout 'Address.*Type.*ServiceName.*Backends.*RedirectTo.*Status'
+!* stdout '169.254.169.254'
+
+# ---
+
+-- lrp.yaml --
+apiVersion: "cilium.io/v2"
+kind: CiliumLocalRedirectPolicy
+metadata:
+  name: "lrp-force"
+  namespace: "test"
+spec:
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/hostname: testnode
+  redirectFrontend:
+    addressMatcher:
+      ip: "169.254.169.254"
+      toPorts:
+        - port: "8080"
+          protocol: TCP
+  redirectBackend:
+    forceRedirect: true
+    localEndpointSelector:
+      matchLabels:
+        app: proxy
+    toPorts:
+      - port: "80"
+        protocol: TCP
+
+-- pod.yaml --
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lrp-pod
+  namespace: test
+  labels:
+    app: proxy
+spec:
+  containers:
+    - name: lrp-pod
+      image: nginx
+      ports:
+        - containerPort: 80
+          name: tcp
+          protocol: TCP
+  nodeName: testnode
+status:
+  hostIP: 172.19.0.3
+  hostIPs:
+  - ip: 172.19.0.3
+  phase: Running
+  podIP: 10.244.2.1
+  podIPs:
+  - ip: 10.244.2.1
+  qosClass: BestEffort
+  startTime: "2024-07-10T16:20:42Z"
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: '2019-07-08T09:41:59Z'
+    status: 'True'
+    type: Ready
