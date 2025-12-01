@@ -7,6 +7,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/job"
+
 	"github.com/cilium/cilium/daemon/infraendpoints"
 	agentK8s "github.com/cilium/cilium/daemon/k8s"
 	linuxdatapath "github.com/cilium/cilium/pkg/datapath/linux"
@@ -242,6 +245,21 @@ func configureDaemon(ctx context.Context, params daemonParams) error {
 	bootstrapStats.k8sInit.Start()
 	params.K8sWatcher.InitK8sSubsystem(ctx)
 	bootstrapStats.k8sInit.End(true)
+
+	params.JobGroup.Add(job.OneShot("wait-for-lb-init", func(ctx context.Context, health cell.Health) error {
+		health.Degraded("Waiting for load-balancer initialization", fmt.Errorf("waiting for load-balancer initialization"))
+
+		// Use a separate timeout context for the wait
+		lbCtx, lbCancel := context.WithTimeout(ctx, option.Config.K8sSyncTimeout)
+		defer lbCancel()
+
+		if err := params.LBInitWaitFunc(lbCtx); err != nil {
+			return fmt.Errorf("failed to wait for load-balancing initialization: %w", err)
+		}
+
+		health.OK("Load-balancer initialized")
+		return nil
+	}))
 
 	bootstrapStats.cleanup.Start()
 	err = clearCiliumVeths(params.Logger)

@@ -53,6 +53,7 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/labelsfilter"
+	"github.com/cilium/cilium/pkg/loadbalancer"
 	lbmaps "github.com/cilium/cilium/pkg/loadbalancer/maps"
 	"github.com/cilium/cilium/pkg/loadinfo"
 	"github.com/cilium/cilium/pkg/logging"
@@ -1225,6 +1226,7 @@ type daemonParams struct {
 
 	Logger    *slog.Logger
 	Lifecycle cell.Lifecycle
+	JobGroup  job.Group
 
 	MetricsRegistry     *metrics.Registry
 	Clientset           k8sClient.Clientset
@@ -1254,6 +1256,7 @@ type daemonParams struct {
 	KPRConfig           kpr.KPRConfig
 	KPRInitializer      kprinitializer.KPRInitializer
 	InfraIPAllocator    infraendpoints.InfraIPAllocator
+	LBInitWaitFunc      loadbalancer.InitWaitFunc
 }
 
 func daemonConfigInitialization(params daemonConfigParams) legacy.DaemonConfigInitialization {
