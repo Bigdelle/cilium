@@ -47,6 +47,7 @@ type statusCollector struct {
 	statusCollector    *Collector
 
 	allProbesInitialized bool
+	lbProbeError         error
 
 	statusParams statusParams
 }
@@ -594,6 +595,11 @@ func (d *statusCollector) GetStatus(brief bool, requireK8sConnectivity bool) mod
 			State: models.StatusStateWarning,
 			Msg:   "Not all probes executed at least once",
 		}
+	case d.lbProbeError != nil:
+		sr.Cilium = &models.Status{
+			State: models.StatusStateWarning,
+			Msg:   fmt.Sprintf("%s    Load Balancer is not ready: %s", ciliumVer, d.lbProbeError),
+		}
 	case len(sr.Stale) > 0:
 		msg := "Stale status data"
 		sr.Cilium = &models.Status{
@@ -640,7 +646,30 @@ func (d *statusCollector) GetStatus(brief bool, requireK8sConnectivity bool) mod
 }
 
 func (d *statusCollector) getProbes() []Probe {
+	var lbReady bool
 	return []Probe{
+		{
+			Name: "load-balancer-status",
+			Probe: func(ctx context.Context) (any, error) {
+				if lbReady || d.statusParams.LBInitWaitFunc == nil {
+					return nil, nil
+				}
+				ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+				defer cancel()
+				err := d.statusParams.LBInitWaitFunc(ctx)
+
+				// If no error, flip the flag to avoid extra processing
+				if err == nil {
+					lbReady = true
+				}
+				return nil, err
+			},
+			OnStatusUpdate: func(status Status) {
+				d.statusCollectMutex.Lock()
+				defer d.statusCollectMutex.Unlock()
+				d.lbProbeError = status.Err
+			},
+		},
 		{
 			Name: "kvstore",
 			Probe: func(ctx context.Context) (any, error) {

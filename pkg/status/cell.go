@@ -95,6 +95,7 @@ type statusParams struct {
 	IPAM             *ipam.IPAM
 	K8sWatcher       *watchers.K8sWatcher
 	L7Proxy          *proxy.Proxy
+	LBInitWaitFunc   loadbalancer.InitWaitFunc
 	MaglevConfig     maglev.Config
 	MonitorAgent     monitoragent.Agent
 	NodeLocalStore   *node.LocalNodeStore
