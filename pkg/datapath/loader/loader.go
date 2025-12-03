@@ -35,6 +35,7 @@ import (
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/endpointstate"
 	"github.com/cilium/cilium/pkg/identity"
+	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/mac"
@@ -84,6 +85,8 @@ type loader struct {
 	hostDpInitializedOnce sync.Once
 	hostDpInitialized     chan struct{}
 
+	lbInitWaitFunc loadbalancer.InitWaitFunc
+
 	sysctl             sysctl.Sysctl
 	prefilter          datapath.PreFilter
 	compilationLock    datapath.CompilationLock
@@ -112,7 +115,8 @@ type Params struct {
 
 	// Force map initialisation before loader. You should not use these otherwise.
 	// Some of the entries in this slice may be nil.
-	BpfMaps []bpf.BpfMap `group:"bpf-maps"`
+	BpfMaps        []bpf.BpfMap `group:"bpf-maps"`
+	LBInitWaitFunc loadbalancer.InitWaitFunc
 }
 
 // newLoader returns a new loader.
@@ -128,6 +132,7 @@ func newLoader(p Params) *loader {
 		configWriter:       p.ConfigWriter,
 		nodeConfigNotifier: p.NodeConfigNotifier,
 		routeManager:       p.RouteManager,
+		lbInitWaitFunc:     p.LBInitWaitFunc,
 
 		db:      p.DB,
 		devices: p.Devices,
@@ -968,6 +973,15 @@ func (l *loader) ReloadDatapath(ctx context.Context, ep datapath.Endpoint, lnc *
 	}
 
 	if ep.IsHost() {
+		// Wait for LB initialization to be complete. This ensures that host BPF
+		// programs which may depend on LB maps are not loaded before the LB has
+		// had a chance to populate them.
+		l.logger.Info("DEBUG: Waiting for LB initialization", logfields.EndpointID, ep.StringID())
+		if err := l.lbInitWaitFunc(ctx); err != nil {
+			return "", fmt.Errorf("waiting for LB initialization: %w", err)
+		}
+		l.logger.Info("DEBUG: LB initialization complete, proceeding with reload", logfields.EndpointID, ep.StringID())
+
 		// Reload bpf programs on cilium_host and cilium_net.
 		stats.BpfLoadProg.Start()
 		err = reloadHostEndpoint(l.logger, ep, lnc, spec)
@@ -980,6 +994,15 @@ func (l *loader) ReloadDatapath(ctx context.Context, ep datapath.Endpoint, lnc *
 
 		return hash, err
 	}
+
+	// Wait for LB initialization to be complete. This ensures that endpoint
+	// BPF programs which may depend on LB maps are not loaded before the LB
+	// has had a chance to populate them.
+	l.logger.Info("DEBUG: Waiting for LB initialization", logfields.EndpointID, ep.StringID())
+	if err := l.lbInitWaitFunc(ctx); err != nil {
+		return "", fmt.Errorf("waiting for LB initialization: %w", err)
+	}
+	l.logger.Info("DEBUG: LB initialization complete, proceeding with reload", logfields.EndpointID, ep.StringID())
 
 	// Reload an lxc endpoint program.
 	stats.BpfLoadProg.Start()

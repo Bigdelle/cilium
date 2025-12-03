@@ -18,6 +18,8 @@ import (
 const logfieldInitializers = "initializers"
 
 func newInitWaitFunc(log *slog.Logger, w *writer.Writer) loadbalancer.InitWaitFunc {
+	time.Sleep(30 * time.Second)
+
 	return func(ctx context.Context) error {
 		// Wait until the frontends table has been initialized.
 		initialized, initDone := w.Frontends().Initialized(w.ReadTxn())
