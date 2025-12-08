@@ -43,6 +43,7 @@ import (
 	"github.com/cilium/cilium/pkg/node/manager"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/promise"
+	"github.com/cilium/cilium/pkg/resourcewait"
 	wgtypes "github.com/cilium/cilium/pkg/wireguard/types"
 )
 
@@ -93,6 +94,7 @@ type loader struct {
 	db           *statedb.DB
 	devices      statedb.Table[*tables.Device]
 	routeManager *routeReconciler.DesiredRouteManager
+	resourceWait promise.Promise[resourcewait.ResourceWait]
 }
 
 type Params struct {
@@ -109,6 +111,7 @@ type Params struct {
 	DB                 *statedb.DB
 	Devices            statedb.Table[*tables.Device]
 	EPRestorer         promise.Promise[endpointstate.Restorer]
+	ResourceWait       promise.Promise[resourcewait.ResourceWait]
 
 	// Force map initialisation before loader. You should not use these otherwise.
 	// Some of the entries in this slice may be nil.
@@ -129,8 +132,9 @@ func newLoader(p Params) *loader {
 		nodeConfigNotifier: p.NodeConfigNotifier,
 		routeManager:       p.RouteManager,
 
-		db:      p.DB,
-		devices: p.Devices,
+		db:           p.DB,
+		devices:      p.Devices,
+		resourceWait: p.ResourceWait,
 	}
 }
 
@@ -948,6 +952,13 @@ func replaceWireguardDatapath(ctx context.Context, logger *slog.Logger, lnc *dat
 // goroutine completes compilation of the template, all other CompileOrLoad
 // invocations will be released.
 func (l *loader) ReloadDatapath(ctx context.Context, ep datapath.Endpoint, lnc *datapath.LocalNodeConfiguration, stats *metrics.SpanStat) (string, error) {
+	// Wait for resources to be ready before reloading datapath.
+	if l.resourceWait != nil {
+		if _, err := l.resourceWait.Await(ctx); err != nil {
+			return "", fmt.Errorf("waiting for resources: %w", err)
+		}
+	}
+
 	dirs := directoryInfo{
 		Library: option.Config.BpfDir,
 		Runtime: option.Config.StateDir,

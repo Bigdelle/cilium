@@ -79,6 +79,7 @@ import (
 	policyK8s "github.com/cilium/cilium/pkg/policy/k8s"
 	"github.com/cilium/cilium/pkg/pprof"
 	"github.com/cilium/cilium/pkg/proxy"
+	"github.com/cilium/cilium/pkg/resourcewait"
 	"github.com/cilium/cilium/pkg/signal"
 	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/status"
@@ -163,6 +164,9 @@ var (
 
 		// Cilium Agent Healthz endpoints (agent, kubeproxy, ...)
 		healthz.Cell,
+
+		// Waits for specific resources to be ready before proceeding.
+		resourcewait.Cell,
 	)
 
 	// ControlPlane implement the per-node control functions. These are pure
