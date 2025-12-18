@@ -190,6 +190,14 @@ type CiliumLocalRedirectPolicySpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="skipRedirectFromBackend is immutable"
 	SkipRedirectFromBackend bool `json:"skipRedirectFromBackend,omitempty"`
 
+	// SkipRedirectFromHost indicates whether traffic matching RedirectFrontend
+	// from the host network namespace should skip redirection.
+	//
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="skipRedirectFromHost is immutable"
+	SkipRedirectFromHost bool `json:"skipRedirectFromHost,omitempty"`
+
 	// Description can be used by the creator of the policy to describe the
 	// purpose of this policy.
 	//

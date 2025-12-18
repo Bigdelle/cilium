@@ -25,6 +25,7 @@ import (
 	"github.com/cilium/cilium/pkg/loadbalancer/reflectors"
 	"github.com/cilium/cilium/pkg/loadbalancer/writer"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/policy/types"
 	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/time"
@@ -555,7 +556,7 @@ func (c *lrpController) updateSkipLB(wtxn writer.WriteTxn, ws *statedb.WatchSet,
 			if newRedirects == nil {
 				newRedirects = map[lb.ServiceName][]lb.L3n4Addr{}
 			}
-			newRedirects[toName] = c.frontendsToSkip(wtxn, ws, lrp)
+			newRedirects[toName] = c.frontendsToSkip(wtxn, ws, lrp, lrp.SkipRedirectFromBackend)
 
 			if skipRedirectsEqual(skiplb.SkipRedirectForFrontends, newRedirects) {
 				continue
@@ -567,6 +568,41 @@ func (c *lrpController) updateSkipLB(wtxn writer.WriteTxn, ws *statedb.WatchSet,
 				skiplb.Status = reconciler.StatusPending()
 			}
 			c.p.DesiredSkipLB.Insert(wtxn, skiplb)
+		}
+
+		if lrp.SkipRedirectFromHost {
+			hostName := "reserved:host:" + lrp.ID.String()
+			orphans.Delete(hostName)
+
+			skiplb, _, watch, found := c.p.DesiredSkipLB.GetWatch(wtxn, desiredSkipLBPodIndex.Query(hostName))
+			ws.Add(watch)
+
+			toName := lrp.RedirectServiceName()
+			if found {
+				skiplb = skiplb.clone()
+			} else {
+				skiplb = newDesiredSkipLB(lrp.ID, hostName)
+				if cookie, err := netns.GetNetNSCookie(); err == nil {
+					skiplb.NetnsCookie = &cookie
+				} else {
+					c.p.Log.Warn("Failed to get host netns cookie", logfields.Error, err)
+				}
+			}
+
+			newRedirects := maps.Clone(skiplb.SkipRedirectForFrontends)
+			if newRedirects == nil {
+				newRedirects = map[lb.ServiceName][]lb.L3n4Addr{}
+			}
+			newRedirects[toName] = c.frontendsToSkip(wtxn, ws, lrp, true)
+
+			if !skipRedirectsEqual(skiplb.SkipRedirectForFrontends, newRedirects) {
+				skiplb.LRPID = lrp.ID
+				skiplb.SkipRedirectForFrontends = newRedirects
+				if skiplb.NetnsCookie != nil {
+					skiplb.Status = reconciler.StatusPending()
+				}
+				c.p.DesiredSkipLB.Insert(wtxn, skiplb)
+			}
 		}
 
 		for podName := range orphans {
@@ -584,8 +620,8 @@ func (c *lrpController) updateSkipLB(wtxn writer.WriteTxn, ws *statedb.WatchSet,
 	}
 }
 
-func (c *lrpController) frontendsToSkip(txn statedb.ReadTxn, ws *statedb.WatchSet, lrp *LocalRedirectPolicy) []lb.L3n4Addr {
-	if !lrp.SkipRedirectFromBackend {
+func (c *lrpController) frontendsToSkip(txn statedb.ReadTxn, ws *statedb.WatchSet, lrp *LocalRedirectPolicy, shouldSkip bool) []lb.L3n4Addr {
+	if !shouldSkip {
 		return nil
 	}
 
