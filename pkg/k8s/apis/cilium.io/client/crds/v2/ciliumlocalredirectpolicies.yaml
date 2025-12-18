@@ -393,6 +393,15 @@ spec:
                 x-kubernetes-validations:
                 - message: skipRedirectFromBackend is immutable
                   rule: self == oldSelf
+              skipRedirectFromHost:
+                default: false
+                description: |-
+                  SkipRedirectFromHost indicates whether traffic matching RedirectFrontend
+                  from the host network namespace should skip redirection.
+                type: boolean
+                x-kubernetes-validations:
+                - message: skipRedirectFromHost is immutable
+                  rule: self == oldSelf
             required:
             - redirectBackend
             - redirectFrontend

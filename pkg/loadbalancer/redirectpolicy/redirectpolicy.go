@@ -120,6 +120,9 @@ type LocalRedirectPolicy struct {
 	ForceRedirectOrDrop bool
 	// NodeSelector is a selector to determine if the policy applies to the node.
 	NodeSelector api.EndpointSelector
+	// SkipRedirectFromHost is the flag that enables/disables redirection
+	// for traffic matching the policy frontend(s) from the host network namespace
+	SkipRedirectFromHost bool
 }
 
 func (lrp *LocalRedirectPolicy) TableHeader() []string {
@@ -352,6 +355,7 @@ func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespa
 		FrontendType:            frontendType,
 		SkipRedirectFromBackend: spec.SkipRedirectFromBackend,
 		ForceRedirectOrDrop:     spec.ForceRedirectOrDrop,
+		SkipRedirectFromHost:    spec.SkipRedirectFromHost,
 		ID:                      lb.NewServiceName(namespace, name),
 		NodeSelector:            nodeSelector,
 	}, nil
