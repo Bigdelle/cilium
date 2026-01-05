@@ -55,6 +55,19 @@ spec:
                   Description can be used by the creator of the policy to describe the
                   purpose of this policy.
                 type: string
+              forceRedirectOrDrop:
+                default: false
+                description: |-
+                  ForceRedirectOrDrop indicates whether traffic should be redirected even if no
+                  backend pods are found.
+
+                  If true:
+                  - If overrideIP is set, traffic is redirected to that IP.
+                  - If overrideIP is NOT set, traffic is dropped (fail closed).
+
+                  If false (default), the redirection rule is removed when no backends are found,
+                  allowing traffic to fall back to the original destination.
+                type: boolean
               redirectBackend:
                 description: |-
                   RedirectBackend specifies backend configuration to redirect traffic to.

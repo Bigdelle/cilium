@@ -198,6 +198,20 @@ type CiliumLocalRedirectPolicySpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="skipRedirectFromBackend is immutable"
 	SkipRedirectFromBackend bool `json:"skipRedirectFromBackend,omitempty"`
 
+	// ForceRedirectOrDrop indicates whether traffic should be redirected even if no
+	// backend pods are found.
+	//
+	// If true:
+	// - If overrideIP is set, traffic is redirected to that IP.
+	// - If overrideIP is NOT set, traffic is dropped (fail closed).
+	//
+	// If false (default), the redirection rule is removed when no backends are found,
+	// allowing traffic to fall back to the original destination.
+	//
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	ForceRedirectOrDrop bool `json:"forceRedirectOrDrop,omitempty"`
+
 	// Description can be used by the creator of the policy to describe the
 	// purpose of this policy.
 	//

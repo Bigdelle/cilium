@@ -321,7 +321,7 @@ func (c *lrpController) updateRedirects(wtxn writer.WriteTxn, ws *statedb.WatchS
 		// In address-based mode there is no existing service/frontend to match against and
 		// instead the frontend is created here.
 		for _, feM := range lrp.FrontendMappings {
-			if len(pods) == 0 {
+			if len(pods) == 0 && !lrp.ForceRedirectOrDrop {
 				// No pods exist to redirect the traffic to. Remove the frontend to let the traffic
 				// be handled normally.
 				c.p.Writer.DeleteFrontend(wtxn, feM.feAddr)
@@ -396,6 +396,29 @@ func (c *lrpController) updateRedirectBackends(wtxn writer.WriteTxn, lrp *LocalR
 	// Construct the BackendParams from matching pods.
 	beps := make([]lb.BackendParams, 0, len(pods))
 	lrpServiceName := lrp.RedirectServiceName()
+	if len(pods) == 0 && lrp.ForceRedirectOrDrop && lrp.BackendOverrideIP != nil {
+		// If no pods match but force redirect is enabled and an override IP is provided,
+		// create a static backend.
+		addrCluster, _ := cmtypes.ParseAddrCluster(lrp.BackendOverrideIP.String())
+		for _, bePort := range lrp.BackendPorts {
+			beps = append(beps, lb.BackendParams{
+				Address: lb.NewL3n4Addr(
+					bePort.l4Addr.Protocol,
+					addrCluster,
+					bePort.l4Addr.Port,
+					lb.ScopeExternal,
+				),
+				State: lb.BackendStateActive,
+				PortNames: func() []string {
+					if bePort.name != "" {
+						return []string{string(bePort.name)}
+					}
+					return []string{}
+				}(),
+			})
+		}
+	}
+
 	for _, podInfo := range pods {
 		for _, addr := range podInfo.addrs {
 			if portNameMatches != nil && !portNameMatches(addr.portName) {
@@ -463,8 +486,8 @@ func (c *lrpController) updateRedirectBackends(wtxn writer.WriteTxn, lrp *LocalR
 }
 
 func shouldRedirectFrontend(log *slog.Logger, lrp *LocalRedirectPolicy, fe *lb.Frontend, pods []podInfo) bool {
-	// 0. Don't redirect if we have no matching target pods.
-	if len(pods) == 0 {
+	// 0. Don't redirect if we have no matching target pods, unless ForceRedirectOrDrop is set.
+	if len(pods) == 0 && !lrp.ForceRedirectOrDrop {
 		return false
 	}
 
