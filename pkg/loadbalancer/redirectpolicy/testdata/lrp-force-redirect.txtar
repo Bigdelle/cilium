@@ -1,0 +1,114 @@
+# Verify forceRedirectOrDrop behavior
+hive start
+
+# 1. ForceRedirectOrDrop=true, No Pods, OverrideIP set -> Redirect to OverrideIP
+k8s/add lrp-force-override.yaml
+db/cmp frontends frontends-1.table
+db/cmp backends backends-1.table
+
+# 2. ForceRedirectOrDrop=true, No Pods, No OverrideIP -> Fail Closed (Frontend exists, No Backends)
+k8s/add lrp-force-drop.yaml
+db/cmp frontends frontends-2.table
+db/cmp backends backends-2.table
+
+# 3. ForceRedirectOrDrop=false (default), No Pods -> Remove Frontend (Fallback)
+k8s/add lrp-default.yaml
+db/cmp frontends frontends-3.table
+
+# Cleanup
+k8s/delete lrp-force-override.yaml
+k8s/delete lrp-force-drop.yaml
+k8s/delete lrp-default.yaml
+db/cmp frontends frontends-empty.table
+
+-- lrp-force-override.yaml --
+apiVersion: "cilium.io/v2"
+kind: CiliumLocalRedirectPolicy
+metadata:
+  name: "lrp-force-override"
+  namespace: test
+spec:
+  redirectFrontend:
+    addressMatcher:
+      ip: "169.254.169.254"
+      toPorts:
+        - port: "8080"
+          protocol: TCP
+  redirectBackend:
+    overrideIP: 1.1.1.1
+    localEndpointSelector:
+      matchLabels:
+        app: non-existent
+    toPorts:
+      - port: "80"
+        protocol: TCP
+  forceRedirectOrDrop: true
+
+-- lrp-force-drop.yaml --
+apiVersion: "cilium.io/v2"
+kind: CiliumLocalRedirectPolicy
+metadata:
+  name: "lrp-force-drop"
+  namespace: test
+spec:
+  redirectFrontend:
+    addressMatcher:
+      ip: "169.254.169.255"
+      toPorts:
+        - port: "9090"
+          protocol: TCP
+  redirectBackend:
+    localEndpointSelector:
+      matchLabels:
+        app: non-existent
+    toPorts:
+      - port: "90"
+        protocol: TCP
+  forceRedirectOrDrop: true
+
+-- lrp-default.yaml --
+apiVersion: "cilium.io/v2"
+kind: CiliumLocalRedirectPolicy
+metadata:
+  name: "lrp-default"
+  namespace: test
+spec:
+  redirectFrontend:
+    addressMatcher:
+      ip: "169.254.169.253"
+      toPorts:
+        - port: "7070"
+          protocol: TCP
+  redirectBackend:
+    localEndpointSelector:
+      matchLabels:
+        app: non-existent
+    toPorts:
+      - port: "70"
+        protocol: TCP
+  # forceRedirectOrDrop: false (default)
+
+-- frontends-1.table --
+Address                    Type          ServiceName                              Backends        RedirectTo  Status
+169.254.169.254:8080/TCP   LocalRedirect test/lrp-force-override:local-redirect   1.1.1.1:80/TCP              Done
+
+-- backends-1.table --
+Address             Instances
+1.1.1.1:80/TCP      test/lrp-force-override:local-redirect
+
+-- frontends-2.table --
+Address                    Type          ServiceName                              Backends        RedirectTo  Status
+169.254.169.254:8080/TCP   LocalRedirect test/lrp-force-override:local-redirect   1.1.1.1:80/TCP              Done
+169.254.169.255:9090/TCP   LocalRedirect test/lrp-force-drop:local-redirect                                   Done
+
+-- backends-2.table --
+Address             Instances
+1.1.1.1:80/TCP      test/lrp-force-override:local-redirect
+
+-- frontends-3.table --
+Address                    Type          ServiceName                              Backends        RedirectTo  Status
+169.254.169.254:8080/TCP   LocalRedirect test/lrp-force-override:local-redirect   1.1.1.1:80/TCP              Done
+169.254.169.255:9090/TCP   LocalRedirect test/lrp-force-drop:local-redirect                                   Done
+
+-- frontends-empty.table --
+Address                    Type          ServiceName                              Backends        RedirectTo  Status

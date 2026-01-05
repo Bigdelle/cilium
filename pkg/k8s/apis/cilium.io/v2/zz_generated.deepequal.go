@@ -1555,6 +1555,9 @@ func (in *CiliumLocalRedirectPolicySpec) DeepEqual(other *CiliumLocalRedirectPol
 	if in.SkipRedirectFromBackend != other.SkipRedirectFromBackend {
 		return false
 	}
+	if in.ForceRedirectOrDrop != other.ForceRedirectOrDrop {
+		return false
+	}
 	if in.Description != other.Description {
 		return false
 	}
