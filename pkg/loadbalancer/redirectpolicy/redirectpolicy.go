@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -26,8 +27,9 @@ import (
 const localRedirectServiceSuffix = ":local-redirect"
 
 const (
-	annotationListenerIPv4 = "cilium.io/listener-ipv4"
-	annotationListenerIPv6 = "cilium.io/listener-ipv6"
+	annotationListenerIPv4         = "cilium.io/listener-ipv4"
+	annotationListenerIPv6         = "cilium.io/listener-ipv6"
+	annotationSkipRedirectFromHost = "cilium.io/skipRedirectFromHost"
 )
 
 func lrpServiceName(lrpID lb.ServiceName) lb.ServiceName {
@@ -119,6 +121,9 @@ type LocalRedirectPolicy struct {
 	ListenerIPv4 netip.Addr
 	// ListenerIPv6 is the IPv6 address to use for the backend listener, overriding the pod IP.
 	ListenerIPv6 netip.Addr
+	// SkipRedirectFromHost is the flag that enables/disables redirection
+	// for traffic matching the policy frontend(s) from the host network namespace.
+	SkipRedirectFromHost bool
 }
 
 func (lrp *LocalRedirectPolicy) TableHeader() []string {
@@ -338,6 +343,13 @@ func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespa
 		}
 	}
 
+	var skipRedirectFromHost bool
+	if val, ok := annotations[annotationSkipRedirectFromHost]; ok {
+		if skip, err := strconv.ParseBool(val); err == nil {
+			skipRedirectFromHost = skip
+		}
+	}
+
 	return &LocalRedirectPolicy{
 		UID:                     uid,
 		ServiceID:               k8sSvc,
@@ -350,6 +362,7 @@ func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespa
 		SkipRedirectFromBackend: spec.SkipRedirectFromBackend,
 		ListenerIPv4:            listenerIPv4,
 		ListenerIPv6:            listenerIPv6,
+		SkipRedirectFromHost:    skipRedirectFromHost,
 		ID:                      lb.NewServiceName(namespace, name),
 	}, nil
 }

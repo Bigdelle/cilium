@@ -25,12 +25,18 @@ import (
 	"github.com/cilium/cilium/pkg/loadbalancer/reflectors"
 	"github.com/cilium/cilium/pkg/loadbalancer/writer"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/policy/types"
 	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/time"
 )
 
-const lrpControllerInitName = "lrp-controller"
+const (
+	lrpControllerInitName = "lrp-controller"
+	// hostPodNamespacedNamePrefix is the prefix for the pseudo-pod name used
+	// in the desiredSkipLB table to represent the host network namespace.
+	hostPodNamespacedNamePrefix = "system/host-"
+)
 
 func registerLRPController(g job.Group, p lrpControllerParams) {
 	if !p.Enabled {
@@ -47,7 +53,17 @@ func registerLRPController(g job.Group, p lrpControllerParams) {
 	desiredSkipLBInit := p.DesiredSkipLB.RegisterInitializer(wtxn, lrpControllerInitName)
 	wtxn.Commit()
 
-	h := &lrpController{p: p, desiredSkipLBInit: desiredSkipLBInit, lbInit: lbInit}
+	hostCookie, err := netns.GetNetNSCookie()
+	if err != nil {
+		p.Log.Error("Failed to get host netns cookie", logfields.Error, err)
+	}
+
+	h := &lrpController{
+		p:                 p,
+		desiredSkipLBInit: desiredSkipLBInit,
+		lbInit:            lbInit,
+		hostCookie:        hostCookie,
+	}
 	g.Add(job.OneShot("controller", h.run))
 }
 
@@ -70,6 +86,7 @@ type lrpController struct {
 	p                 lrpControllerParams
 	desiredSkipLBInit func(statedb.WriteTxn)
 	lbInit            func(writer.WriteTxn)
+	hostCookie        uint64
 
 	skipLBWarningLogged bool
 }
@@ -286,6 +303,7 @@ func (c *lrpController) processRedirectPolicy(wtxn writer.WriteTxn, lrpID lb.Ser
 	}
 	c.updateRedirectBackends(wtxn, lrp, matchingPods)
 	c.updateSkipLB(wtxn, ws, lrp, matchingPods)
+	c.updateHostSkipLB(wtxn, ws, lrp, matchingPods)
 	c.updateRedirects(wtxn, ws, cleanup, lrp, matchingPods)
 
 	return ws, cleanup
@@ -575,7 +593,7 @@ func (c *lrpController) updateSkipLB(wtxn writer.WriteTxn, ws *statedb.WatchSet,
 			if newRedirects == nil {
 				newRedirects = map[lb.ServiceName][]lb.L3n4Addr{}
 			}
-			newRedirects[toName] = c.frontendsToSkip(wtxn, ws, lrp)
+			newRedirects[toName] = c.frontendsToSkip(wtxn, ws, lrp, lrp.SkipRedirectFromBackend)
 
 			if skipRedirectsEqual(skiplb.SkipRedirectForFrontends, newRedirects) {
 				continue
@@ -604,8 +622,56 @@ func (c *lrpController) updateSkipLB(wtxn writer.WriteTxn, ws *statedb.WatchSet,
 	}
 }
 
-func (c *lrpController) frontendsToSkip(txn statedb.ReadTxn, ws *statedb.WatchSet, lrp *LocalRedirectPolicy) []lb.L3n4Addr {
-	if !lrp.SkipRedirectFromBackend {
+// updateHostSkipLB updates the desiredSkipLB table with an entry for the host
+// network namespace if the "skipRedirectFromHost" annotation is set in the LRP.
+//
+// This enables bypassing LRP redirection for traffic originating from the host
+// (or host-networking pods), allowing them to reach the original destination.
+func (c *lrpController) updateHostSkipLB(wtxn writer.WriteTxn, ws *statedb.WatchSet, lrp *LocalRedirectPolicy, pods []podInfo) {
+	if !c.p.NetNSCookieSupport() {
+		return
+	}
+
+	skipFromHost := lrp.SkipRedirectFromHost
+
+	hostKey := hostPodNamespacedNamePrefix + lrp.ID.String()
+	skiplb, _, watch, found := c.p.DesiredSkipLB.GetWatch(wtxn, desiredSkipLBPodIndex.Query(hostKey))
+	ws.Add(watch)
+
+	if !skipFromHost {
+		if !found || len(skiplb.SkipRedirectForFrontends) == 0 {
+			return
+		}
+	}
+
+	if found {
+		skiplb = skiplb.clone()
+	} else {
+		skiplb = newDesiredSkipLB(lrp.ID, hostKey)
+		// Manually set cookie for host. The Cilium agent runs in the host network
+		// namespace, so its own netns cookie identifies the host netns.
+		skiplb.NetnsCookie = &c.hostCookie
+	}
+
+	toName := lrp.RedirectServiceName()
+	newRedirects := maps.Clone(skiplb.SkipRedirectForFrontends)
+	if newRedirects == nil {
+		newRedirects = map[lb.ServiceName][]lb.L3n4Addr{}
+	}
+	newRedirects[toName] = c.frontendsToSkip(wtxn, ws, lrp, skipFromHost)
+
+	if skipRedirectsEqual(skiplb.SkipRedirectForFrontends, newRedirects) {
+		return
+	}
+
+	skiplb.LRPID = lrp.ID
+	skiplb.SkipRedirectForFrontends = newRedirects
+	skiplb.Status = reconciler.StatusPending()
+	c.p.DesiredSkipLB.Insert(wtxn, skiplb)
+}
+
+func (c *lrpController) frontendsToSkip(txn statedb.ReadTxn, ws *statedb.WatchSet, lrp *LocalRedirectPolicy, shouldSkip bool) []lb.L3n4Addr {
+	if !shouldSkip {
 		return nil
 	}
 
@@ -672,7 +738,6 @@ type podInfo struct {
 	namespacedName string
 	addrs          []podAddr
 	labels         map[string]string
-	annotations    map[string]string
 }
 
 func getPodInfo(pod daemonk8s.LocalPod) podInfo {
@@ -681,7 +746,6 @@ func getPodInfo(pod daemonk8s.LocalPod) podInfo {
 		namespacedName: pod.Namespace + "/" + pod.Name,
 		addrs:          podAddrs(pod.Pod),
 		labels:         pod.Labels,
-		annotations:    pod.Annotations,
 	}
 }
 

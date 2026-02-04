@@ -1,0 +1,150 @@
+# Test the handling of 'cilium.io/skipRedirectFromHost'. If this annotation is set to "true"
+# in the LocalRedirectPolicy, the SkipLBMap should be populated for the host network namespace.
+
+hive start
+
+# Add services and endpoints.
+k8s/add service.yaml endpointslice.yaml
+
+# Add the backend pod and LRP with host skip annotation
+k8s/add pod.yaml lrp-host-skip.yaml
+
+# Verify that the host entry exists in desired-skiplbmap.
+# The key should be system/host-test/lrp-svc.
+# We expect to see redirects to the service frontend.
+db/show desired-skiplbmap
+* stdout 'system/host-test/lrp-svc'
+* stdout '169.254.169.254:8080/TCP'
+
+# Update LRP to disable host skip
+k8s/update lrp-host-noskip.yaml
+
+# Check that the redirects are removed for the host entry.
+db/show desired-skiplbmap
+# Ensure the entry still exists (it's updated, not deleted immediately unless LRP deleted)
+# Actually, controller logic keeps it with empty redirects.
+* stdout 'system/host-test/lrp-svc'
+# Ensure redirects are gone (wait for update).
+# We match the row where SkipRedirects column is empty (only whitespace between Policy and Cookie).
+# Cookie is '1' in this test environment.
+* stdout 'system/host-test/lrp-svc\s+test/lrp-svc\s+1'
+
+# Cleanup
+k8s/delete pod.yaml service.yaml endpointslice.yaml lrp-host-noskip.yaml
+
+-- lrp-host-skip.yaml --
+apiVersion: "cilium.io/v2"
+kind: CiliumLocalRedirectPolicy
+metadata:
+  name: "lrp-svc"
+  namespace: "test"
+  annotations:
+    cilium.io/skipRedirectFromHost: "true"
+spec:
+  redirectFrontend:
+    serviceMatcher:
+      serviceName: echo
+      namespace: test
+  redirectBackend:
+    localEndpointSelector:
+      matchLabels:
+        app: proxy
+    toPorts:
+      - port: "80"
+        name: "tcp"
+        protocol: TCP
+
+-- lrp-host-noskip.yaml --
+apiVersion: "cilium.io/v2"
+kind: CiliumLocalRedirectPolicy
+metadata:
+  name: "lrp-svc"
+  namespace: "test"
+  annotations:
+    cilium.io/skipRedirectFromHost: "false"
+spec:
+  redirectFrontend:
+    serviceMatcher:
+      serviceName: echo
+      namespace: test
+  redirectBackend:
+    localEndpointSelector:
+      matchLabels:
+        app: proxy
+    toPorts:
+      - port: "80"
+        name: "tcp"
+        protocol: TCP
+
+-- pod.yaml --
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lrp-pod
+  namespace: test
+  labels:
+    app: proxy
+spec:
+  containers:
+    - name: lrp-pod
+      image: nginx
+      ports:
+        - containerPort: 80
+          name: tcp
+          protocol: TCP
+  nodeName: testnode
+status:
+  phase: Running
+  podIP: 10.244.2.1
+  podIPs:
+  - ip: 10.244.2.1
+  - ip: 2002::2
+  conditions:
+  - status: 'True'
+    type: Ready
+
+-- service.yaml --
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: test
+spec:
+  clusterIP: 169.254.169.254
+  clusterIPs:
+  - 169.254.169.254
+  - 1001::1
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: tcp
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    name: echo
+  sessionAffinity: None
+  type: ClusterIP
+
+-- endpointslice.yaml --
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: echo-kvlm2
+  namespace: test
+  labels:
+    kubernetes.io/service-name: echo
+addressType: IPv4
+endpoints:
+- addresses:
+  - 10.244.1.1
+  - 2001::1
+  conditions:
+    ready: true
+ports:
+- name: tcp
+  port: 8080
+  protocol: TCP
