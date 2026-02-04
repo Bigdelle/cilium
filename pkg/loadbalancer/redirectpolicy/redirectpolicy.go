@@ -6,6 +6,7 @@ package redirectpolicy
 import (
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -23,6 +24,11 @@ import (
 // name to construct the pseudo-service name to which the matched pods are associated
 // as backends. ':' is used as separator as that is not an allowed character in k8s.
 const localRedirectServiceSuffix = ":local-redirect"
+
+const (
+	annotationListenerIPv4 = "cilium.io/listener-ipv4"
+	annotationListenerIPv6 = "cilium.io/listener-ipv6"
+)
 
 func lrpServiceName(lrpID lb.ServiceName) lb.ServiceName {
 	return lrpID.AppendSuffix(localRedirectServiceSuffix)
@@ -109,6 +115,10 @@ type LocalRedirectPolicy struct {
 	// SkipRedirectFromBackend is the flag that enables/disables redirection
 	// for traffic matching the policy frontend(s) from the backends selected by the policy
 	SkipRedirectFromBackend bool
+	// ListenerIPv4 is the IPv4 address to use for the backend listener, overriding the pod IP.
+	ListenerIPv4 netip.Addr
+	// ListenerIPv6 is the IPv6 address to use for the backend listener, overriding the pod IP.
+	ListenerIPv6 netip.Addr
 }
 
 func (lrp *LocalRedirectPolicy) TableHeader() []string {
@@ -175,10 +185,10 @@ func parseLRP(cfg Config, log *slog.Logger, clrp *v2.CiliumLocalRedirectPolicy) 
 		return nil, fmt.Errorf("CiliumLocalRedirectPolicy must have a non-empty namespace")
 	}
 
-	return getSanitizedLocalRedirectPolicy(cfg, log, name, namespace, clrp.UID, clrp.Spec)
+	return getSanitizedLocalRedirectPolicy(cfg, log, name, namespace, clrp.UID, clrp.Annotations, clrp.Spec)
 }
 
-func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespace string, uid types.UID, spec v2.CiliumLocalRedirectPolicySpec) (*LocalRedirectPolicy, error) {
+func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespace string, uid types.UID, annotations map[string]string, spec v2.CiliumLocalRedirectPolicySpec) (*LocalRedirectPolicy, error) {
 
 	var (
 		addrMatcher    = spec.RedirectFrontend.AddressMatcher
@@ -315,6 +325,19 @@ func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespa
 	// Get an EndpointSelector from the passed policy labelSelector for optimized matching.
 	sel := policytypes.NewLabelSelector(api.NewESFromK8sLabelSelector(labels.LabelSourceK8sKeyPrefix, &redirectTo.LocalEndpointSelector))
 
+	// Parse listener IP overrides from annotations
+	var listenerIPv4, listenerIPv6 netip.Addr
+	if val, ok := annotations[annotationListenerIPv4]; ok {
+		if ip, err := netip.ParseAddr(val); err == nil && ip.Is4() {
+			listenerIPv4 = ip
+		}
+	}
+	if val, ok := annotations[annotationListenerIPv6]; ok {
+		if ip, err := netip.ParseAddr(val); err == nil && ip.Is6() {
+			listenerIPv6 = ip
+		}
+	}
+
 	return &LocalRedirectPolicy{
 		UID:                     uid,
 		ServiceID:               k8sSvc,
@@ -325,6 +348,8 @@ func getSanitizedLocalRedirectPolicy(cfg Config, log *slog.Logger, name, namespa
 		LRPType:                 lrpType,
 		FrontendType:            frontendType,
 		SkipRedirectFromBackend: spec.SkipRedirectFromBackend,
+		ListenerIPv4:            listenerIPv4,
+		ListenerIPv6:            listenerIPv6,
 		ID:                      lb.NewServiceName(namespace, name),
 	}, nil
 }

@@ -406,8 +406,28 @@ func (c *lrpController) updateRedirectBackends(wtxn writer.WriteTxn, lrp *LocalR
 			if !portNumberMatches {
 				continue
 			}
+
+			l3n4Addr := addr.L3n4Addr
+			if l3n4Addr.Addr().Is4() && lrp.ListenerIPv4.IsValid() {
+				// Use the listener IP from the policy, keeping the port and scope from the pod.
+				l3n4Addr = lb.NewL3n4Addr(
+					l3n4Addr.Protocol(),
+					cmtypes.AddrClusterFrom(lrp.ListenerIPv4, 0),
+					l3n4Addr.Port(),
+					l3n4Addr.Scope(),
+				)
+			} else if l3n4Addr.Addr().Is6() && lrp.ListenerIPv6.IsValid() {
+				// Use the listener IP from the policy, keeping the port and scope from the pod.
+				l3n4Addr = lb.NewL3n4Addr(
+					l3n4Addr.Protocol(),
+					cmtypes.AddrClusterFrom(lrp.ListenerIPv6, 0),
+					l3n4Addr.Port(),
+					l3n4Addr.Scope(),
+				)
+			}
+
 			beps = append(beps, lb.BackendParams{
-				Address: addr.L3n4Addr,
+				Address: l3n4Addr,
 				State:   lb.BackendStateActive,
 				PortNames: func() []string {
 					if addr.portName != "" {
@@ -620,11 +640,13 @@ func podAddrs(pod *slim_corev1.Pod) (addrs []podAddr) {
 		// IPs not available yet.
 		return nil
 	}
+
 	for _, podIP := range podIPs {
 		addrCluster, err := cmtypes.ParseAddrCluster(podIP)
 		if err != nil {
 			continue
 		}
+
 		for _, container := range pod.Spec.Containers {
 			for _, port := range container.Ports {
 				l4addr := lb.NewL4Addr(lb.L4Type(port.Protocol), uint16(port.ContainerPort))
@@ -650,6 +672,7 @@ type podInfo struct {
 	namespacedName string
 	addrs          []podAddr
 	labels         map[string]string
+	annotations    map[string]string
 }
 
 func getPodInfo(pod daemonk8s.LocalPod) podInfo {
@@ -658,6 +681,7 @@ func getPodInfo(pod daemonk8s.LocalPod) podInfo {
 		namespacedName: pod.Namespace + "/" + pod.Name,
 		addrs:          podAddrs(pod.Pod),
 		labels:         pod.Labels,
+		annotations:    pod.Annotations,
 	}
 }
 

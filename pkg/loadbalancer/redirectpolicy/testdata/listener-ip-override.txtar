@@ -1,0 +1,123 @@
+# Test the handling of 'cilium.io/listener-ipv4' annotation.
+# If set, the backend IP for the redirection should be the annotated IP,
+# not the Pod IP.
+
+hive start
+
+# Add services and endpoints.
+k8s/add service.yaml endpointslice.yaml
+
+# Add the backend pod (IP: 10.244.2.1)
+k8s/add pod.yaml
+
+# Add CLRP with listener override annotation (IP: 1.1.1.1)
+k8s/add lrp-override.yaml
+
+# Verify that a backend with the override IP (1.1.1.1) has been created.
+# The pod's container port is 80.
+db/show backends
+* stdout '1.1.1.1:80/TCP'
+
+# Verify that the redirect service uses this backend.
+# The redirect service name is test/lrp-override:local-redirect.
+# We can check lb maps or verify that the frontend redirects to this service.
+db/show frontends
+* stdout 'test/lrp-override:local-redirect'
+
+# Cleanup
+k8s/delete pod.yaml service.yaml endpointslice.yaml lrp-override.yaml
+
+-- lrp-override.yaml --
+apiVersion: "cilium.io/v2"
+kind: CiliumLocalRedirectPolicy
+metadata:
+  name: "lrp-override"
+  namespace: "test"
+  annotations:
+    cilium.io/listener-ipv4: "1.1.1.1"
+spec:
+  redirectFrontend:
+    serviceMatcher:
+      serviceName: echo
+      namespace: test
+  redirectBackend:
+    localEndpointSelector:
+      matchLabels:
+        app: proxy
+    toPorts:
+      - port: "80"
+        name: "tcp"
+        protocol: TCP
+
+-- pod.yaml --
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lrp-pod
+  namespace: test
+  labels:
+    app: proxy
+spec:
+  containers:
+    - name: lrp-pod
+      image: nginx
+      ports:
+        - containerPort: 80
+          name: tcp
+          protocol: TCP
+  nodeName: testnode
+status:
+  phase: Running
+  podIP: 10.244.2.1
+  podIPs:
+  - ip: 10.244.2.1
+  - ip: 2002::2
+  conditions:
+  - status: 'True'
+    type: Ready
+
+-- service.yaml --
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: test
+spec:
+  clusterIP: 169.254.169.254
+  clusterIPs:
+  - 169.254.169.254
+  - 1001::1
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: tcp
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    name: echo
+  sessionAffinity: None
+  type: ClusterIP
+
+-- endpointslice.yaml --
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: echo-kvlm2
+  namespace: test
+  labels:
+    kubernetes.io/service-name: echo
+addressType: IPv4
+endpoints:
+- addresses:
+  - 10.244.1.1
+  - 2001::1
+  conditions:
+    ready: true
+ports:
+- name: tcp
+  port: 8080
+  protocol: TCP

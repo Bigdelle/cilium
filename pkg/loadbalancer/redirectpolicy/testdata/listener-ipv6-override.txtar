@@ -1,0 +1,116 @@
+# Test the handling of 'cilium.io/listener-ipv6' annotation.
+# If set, the backend IP for the redirection should be the annotated IPv6 address.
+
+hive start
+
+# Add services and endpoints.
+k8s/add service-ipv6.yaml endpointslice-ipv6.yaml
+
+# Add the backend pod (IPv6: 2002::2)
+k8s/add pod.yaml
+
+# Add CLRP with listener override annotation (IP: 3003::3)
+k8s/add lrp-override-ipv6.yaml
+
+# Verify that a backend with the override IP (3003::3) has been created.
+db/show backends
+* stdout '\[3003::3\]:80/TCP'
+
+# Verify that the redirect service uses this backend.
+db/show frontends
+* stdout 'test/lrp-override-ipv6:local-redirect'
+
+# Cleanup
+k8s/delete pod.yaml service-ipv6.yaml endpointslice-ipv6.yaml lrp-override-ipv6.yaml
+
+-- lrp-override-ipv6.yaml --
+apiVersion: "cilium.io/v2"
+kind: CiliumLocalRedirectPolicy
+metadata:
+  name: "lrp-override-ipv6"
+  namespace: "test"
+  annotations:
+    cilium.io/listener-ipv6: "3003::3"
+spec:
+  redirectFrontend:
+    serviceMatcher:
+      serviceName: echo-ipv6
+      namespace: test
+  redirectBackend:
+    localEndpointSelector:
+      matchLabels:
+        app: proxy
+    toPorts:
+      - port: "80"
+        name: "tcp"
+        protocol: TCP
+
+-- pod.yaml --
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lrp-pod
+  namespace: test
+  labels:
+    app: proxy
+spec:
+  containers:
+    - name: lrp-pod
+      image: nginx
+      ports:
+        - containerPort: 80
+          name: tcp
+          protocol: TCP
+  nodeName: testnode
+status:
+  phase: Running
+  podIP: 2002::2
+  podIPs:
+  - ip: 2002::2
+  conditions:
+  - status: 'True'
+    type: Ready
+
+-- service-ipv6.yaml --
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-ipv6
+  namespace: test
+spec:
+  clusterIP: 1001::1
+  clusterIPs:
+  - 1001::1
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv6
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: tcp
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    name: echo
+  sessionAffinity: None
+  type: ClusterIP
+
+-- endpointslice-ipv6.yaml --
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: echo-ipv6-kvlm2
+  namespace: test
+  labels:
+    kubernetes.io/service-name: echo-ipv6
+addressType: IPv6
+endpoints:
+- addresses:
+  - 2002::2
+  conditions:
+    ready: true
+ports:
+- name: tcp
+  port: 8080
+  protocol: TCP
