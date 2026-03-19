@@ -761,6 +761,9 @@ const (
 	// EnableEndpointRoutes enables use of per endpoint routes
 	EnableEndpointRoutes = "enable-endpoint-routes"
 
+	// BPFHostRoutingCIDR describes a CIDR in which BPF host routing is enabled
+	BPFHostRoutingCIDR = "bpf-host-routing-cidr"
+
 	// ExcludeLocalAddress excludes certain addresses to be recognized as a
 	// local address
 	ExcludeLocalAddress = "exclude-local-address"
@@ -1640,6 +1643,9 @@ type DaemonConfig struct {
 	// a local address
 	ExcludeLocalAddresses []netip.Prefix
 
+	// BPFHostRoutingCIDRs is a list of CIDRs in which BPF host routing is enabled
+	BPFHostRoutingCIDRs []netip.Prefix
+
 	// IPv4PodSubnets available subnets to be assign IPv4 addresses to pods from
 	IPv4PodSubnets []*net.IPNet
 
@@ -2359,6 +2365,17 @@ func (c *DaemonConfig) parseExcludedLocalAddresses(s []string) error {
 	return nil
 }
 
+func (c *DaemonConfig) parseBPFHostRoutingCIDRs(s []string) error {
+	for _, ipString := range s {
+		prefix, err := netip.ParsePrefix(ipString)
+		if err != nil {
+			return fmt.Errorf("unable to parse BPF host routing CIDR %s: %w", ipString, err)
+		}
+		c.BPFHostRoutingCIDRs = append(c.BPFHostRoutingCIDRs, prefix)
+	}
+	return nil
+}
+
 // SetupLogging sets all logging-related options with the values from viper,
 // then setup logging based on these options and the given tag.
 //
@@ -2760,6 +2777,10 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
 
 	if err := c.parseExcludedLocalAddresses(vp.GetStringSlice(ExcludeLocalAddress)); err != nil {
 		logging.Fatal(logger, "Unable to parse excluded local addresses", logfields.Error, err)
+	}
+
+	if err := c.parseBPFHostRoutingCIDRs(vp.GetStringSlice(BPFHostRoutingCIDR)); err != nil {
+		logging.Fatal(logger, "Unable to parse BPF host routing CIDRs", logfields.Error, err)
 	}
 
 	// Ensure CiliumEndpointSlice is enabled only if CiliumEndpointCRD is enabled too.

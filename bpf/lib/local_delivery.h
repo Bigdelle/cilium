@@ -75,7 +75,7 @@ should_redirect_peer(bool from_host)
 	 * Note: both redirect() and redirect_peer() only traverse the CPU
 	 * backlog queue once.
 	 */
-	return is_defined(ENABLE_HOST_ROUTING) &&
+	return ENABLE_HOST_ROUTING &&
 	       !from_host &&
 	       !CONFIG(enable_netkit);
 }

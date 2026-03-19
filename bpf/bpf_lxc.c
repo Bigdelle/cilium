@@ -47,6 +47,7 @@
 #define LB_SELECTION LB_SELECTION_RANDOM
 
 #include "lib/lb.h"
+#include "lib/host_routing.h"
 #include "lib/drop.h"
 #include "lib/trace.h"
 #include "lib/srv6.h"
@@ -724,7 +725,14 @@ ipv6_forward_to_destination(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
 	set_identity_mark(ctx, SECLABEL_IPV6, MARK_MAGIC_IDENTITY);
 #endif
 
-	if (is_defined(ENABLE_ROUTING) || hairpin_flow || is_defined(ENABLE_HOST_ROUTING)) {
+	bool do_host_routing = host_routing_enabled_v6((union v6addr *)&ip6->saddr,
+						      (union v6addr *)&ip6->daddr);
+
+#ifndef ENABLE_HOST_ROUTING
+	#define ENABLE_HOST_ROUTING do_host_routing
+#endif
+
+	if (is_defined(ENABLE_ROUTING) || hairpin_flow || ENABLE_HOST_ROUTING) {
 		const struct endpoint_info *ep;
 		union v6addr daddr;
 
@@ -783,7 +791,7 @@ ipv6_forward_to_destination(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
 						      bpf_htons(ETH_P_IPV6));
 	}
 #endif
-	if (is_defined(ENABLE_HOST_ROUTING)) {
+	if (ENABLE_HOST_ROUTING) {
 		int oif = 0;
 		__u32 tbid = CONFIG(fib_table_id);
 
@@ -1206,6 +1214,12 @@ ipv4_forward_to_destination(struct __ctx_buff *ctx, struct iphdr *ip4,
 	set_identity_mark(ctx, SECLABEL_IPV4, MARK_MAGIC_IDENTITY);
 #endif
 
+	bool do_host_routing = host_routing_enabled_v4(ip4->saddr, ip4->daddr);
+
+#ifndef ENABLE_HOST_ROUTING
+	#define ENABLE_HOST_ROUTING do_host_routing
+#endif
+
 	/* Allow a hairpin packet to be redirected even if ENABLE_ROUTING is
 	 * disabled (for example, with per-endpoint routes). Otherwise, the
 	 * packet will be dropped by the kernel if the packet will be routed to
@@ -1219,7 +1233,7 @@ ipv4_forward_to_destination(struct __ctx_buff *ctx, struct iphdr *ip4,
 	 * that endpoint.
 	 */
 	if (is_defined(ENABLE_ROUTING) || hairpin_flow ||
-	    is_defined(ENABLE_HOST_ROUTING)) {
+	    ENABLE_HOST_ROUTING) {
 		__be32 daddr = ip4->daddr;
 		const struct endpoint_info *ep;
 
@@ -1343,7 +1357,7 @@ ipv4_forward_to_destination(struct __ctx_buff *ctx, struct iphdr *ip4,
 	}
 #endif /* TUNNEL_MODE */
 
-	if (is_defined(ENABLE_HOST_ROUTING)) {
+	if (ENABLE_HOST_ROUTING) {
 		int oif = 0;
 		__u32 tbid = CONFIG(fib_table_id);
 

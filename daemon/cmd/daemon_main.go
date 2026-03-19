@@ -255,6 +255,9 @@ func InitGlobalFlags(logger *slog.Logger, cmd *cobra.Command, vp *viper.Viper) {
 	flags.StringSlice(option.ExcludeLocalAddress, []string{}, "Exclude CIDR from being recognized as local address")
 	option.BindEnv(vp, option.ExcludeLocalAddress)
 
+	flags.StringSlice(option.BPFHostRoutingCIDR, []string{}, "Enable BPF host routing for the given CIDR")
+	option.BindEnv(vp, option.BPFHostRoutingCIDR)
+
 	flags.Bool(option.DisableCiliumEndpointCRDName, false, "Disable use of CiliumEndpoint CRD")
 	option.BindEnv(vp, option.DisableCiliumEndpointCRDName)
 

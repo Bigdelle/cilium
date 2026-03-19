@@ -59,6 +59,7 @@
 #include "lib/l2_responder.h"
 #include "lib/vtep.h"
 #include "lib/subnet.h"
+#include "lib/host_routing.h"
 
  #define host_egress_policy_hook(ctx, src_sec_identity, ext_err) CTX_ACT_OK
  #define host_wg_encrypt_hook(ctx, proto, src_sec_identity)			\
@@ -331,11 +332,15 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 	}
 #endif /* ENABLE_SRV6 */
 
+	bool do_host_routing = host_routing_enabled_v6((union v6addr *)&ip6->saddr,
+												  (union v6addr *)&ip6->daddr);
+
 #ifndef ENABLE_HOST_ROUTING
-	/* See the equivalent v4 path for comments */
-	if (!from_host)
+	#define ENABLE_HOST_ROUTING do_host_routing
+#endif
+
+	if (!from_host && !ENABLE_HOST_ROUTING)
 		return CTX_ACT_OK;
-#endif /* !ENABLE_HOST_ROUTING */
 
 	/* Lookup IPv6 address in list of local endpoints */
 	ep = lookup_ip6_endpoint(ip6);
@@ -346,9 +351,8 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 		if (ep->flags & ENDPOINT_MASK_HOST_DELIVERY)
 			return CTX_ACT_OK;
 
-#ifdef ENABLE_HOST_ROUTING
 		/* add L2 header for L2-less interface: */
-		if (!from_host && THIS_IS_L3_DEV) {
+		if (ENABLE_HOST_ROUTING && !from_host && THIS_IS_L3_DEV) {
 			bool l2_hdr_required = true;
 
 			ret = maybe_add_l2_hdr(ctx, ep->ifindex, &l2_hdr_required);
@@ -359,7 +363,6 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 				l3_off += __ETH_HLEN;
 			}
 		}
-#endif
 		return ipv6_local_delivery(ctx, l3_off, secctx, magic, ep,
 					   METRIC_INGRESS, from_host, false);
 	}
@@ -737,19 +740,14 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 	}
 #endif /* ENABLE_HOST_FIREWALL */
 
+	bool do_host_routing = host_routing_enabled_v4(ip4->saddr, ip4->daddr);
+
 #ifndef ENABLE_HOST_ROUTING
-	/* Without bpf_redirect_neigh() helper, we cannot redirect a
-	 * packet to a local endpoint in the direct routing mode, as
-	 * the redirect bypasses nf_conntrack table. This makes a
-	 * second reply from the endpoint to be MASQUERADEd or to be
-	 * DROP-ed by k8s's "--ctstate INVALID -j DROP" depending via
-	 * which interface it was inputed. With bpf_redirect_neigh()
-	 * we bypass request and reply path in the host namespace and
-	 * do not run into this issue.
-	 */
-	if (!from_host)
+	#define ENABLE_HOST_ROUTING do_host_routing
+#endif
+
+	if (!from_host && !ENABLE_HOST_ROUTING)
 		return CTX_ACT_OK;
-#endif /* !ENABLE_HOST_ROUTING */
 
 	/* Lookup IPv4 address in list of local endpoints and host IPs */
 	ep = lookup_ip4_endpoint(ip4);
@@ -762,9 +760,8 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 		if (ep->flags & ENDPOINT_MASK_HOST_DELIVERY)
 			return CTX_ACT_OK;
 
-#ifdef ENABLE_HOST_ROUTING
 		/* add L2 header for L2-less interface: */
-		if (!from_host && THIS_IS_L3_DEV) {
+		if (ENABLE_HOST_ROUTING && !from_host && THIS_IS_L3_DEV) {
 			bool l2_hdr_required = true;
 
 			ret = maybe_add_l2_hdr(ctx, ep->ifindex, &l2_hdr_required);
@@ -779,7 +776,6 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 					return DROP_INVALID;
 			}
 		}
-#endif
 
 		return ipv4_local_delivery(ctx, l3_off, secctx, magic, ip4, ep,
 					   METRIC_INGRESS, from_host, false, 0);

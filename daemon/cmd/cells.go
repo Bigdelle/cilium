@@ -65,6 +65,7 @@ import (
 	ipmasqmaps "github.com/cilium/cilium/pkg/maps/ipmasq"
 	"github.com/cilium/cilium/pkg/maps/iptrace"
 	"github.com/cilium/cilium/pkg/maps/metricsmap"
+	"github.com/cilium/cilium/pkg/maps/hostrouting"
 	natStats "github.com/cilium/cilium/pkg/maps/nat/stats"
 	"github.com/cilium/cilium/pkg/maps/ratelimitmap"
 	"github.com/cilium/cilium/pkg/metrics"
@@ -178,6 +179,9 @@ var (
 
 		// IP allocation and creation of agents infrastructure endpoints (host, health & ingress)
 		infraendpoints.Cell,
+
+		// Selective BPF host routing
+		hostrouting.Cell,
 
 		// Syncs local host entries to the lxc/endpoints BPF map and IPCache
 		hostIPSyncCell,
