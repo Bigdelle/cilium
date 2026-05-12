@@ -31,6 +31,7 @@
     - [PrepareCollectionResponse](#datapathplugins-PrepareCollectionResponse)
     - [PrepareCollectionResponse.HookSpec](#datapathplugins-PrepareCollectionResponse-HookSpec)
     - [PrepareCollectionResponse.HookSpec.OrderingConstraint](#datapathplugins-PrepareCollectionResponse-HookSpec-OrderingConstraint)
+    - [PrepareCollectionResponse.MapReplacement](#datapathplugins-PrepareCollectionResponse-MapReplacement)
   
     - [HookType](#datapathplugins-HookType)
     - [PrepareCollectionResponse.HookSpec.OrderingConstraint.Order](#datapathplugins-PrepareCollectionResponse-HookSpec-OrderingConstraint-Order)
@@ -450,6 +451,7 @@ them, and informs Cilium in the PrepareCollectionResponse.
 | ----- | ---- | ----- | ----------- |
 | hooks | [PrepareCollectionResponse.HookSpec](#datapathplugins-PrepareCollectionResponse-HookSpec) | repeated | list of hooks that should be added to the collection. |
 | cookie | [string](#string) |  | cookie is an opaque string that will be passed in the subsequent InstrumentCollectionRequest related to this PrepareCollectionRequest. It may be used by plugins to associate the two requests or carry metadata between them. |
+| map_replacements | [PrepareCollectionResponse.MapReplacement](#datapathplugins-PrepareCollectionResponse-MapReplacement) | repeated | map_replacements instructs Cilium to substitute standard maps defined in the base collection with custom, plugin-supplied maps using their kernel Map IDs. The replacement maps must be persistently pinned and kept alive by the plugin itself. |
 
 
 
@@ -484,6 +486,22 @@ go at this hook point relative to other plugins&#39; hooks.
 | ----- | ---- | ----- | ----------- |
 | order | [PrepareCollectionResponse.HookSpec.OrderingConstraint.Order](#datapathplugins-PrepareCollectionResponse-HookSpec-OrderingConstraint-Order) |  |  |
 | plugin | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="datapathplugins-PrepareCollectionResponse-MapReplacement"></a>
+
+### PrepareCollectionResponse.MapReplacement
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| map_name | [string](#string) |  | name of the map in the collection to replace. |
+| map_id | [uint32](#uint32) |  | kernel map ID of the replacement map. |
 
 
 

@@ -901,6 +901,7 @@ func TestPrivilegedLoadAndAssignWithPlugins(t *testing.T) {
 		transactions         map[string]transaction
 		expectedOutputValues outputValues
 		expectedErr          error
+		setup                func(t *testing.T, tmp string, txs map[string]transaction)
 	}{
 		{
 			name: "pre and post hooks basic",
@@ -1092,6 +1093,63 @@ func TestPrivilegedLoadAndAssignWithPlugins(t *testing.T) {
 			},
 			expectedErr: errors.New("some error"),
 		},
+		{
+			name: "map replacements basic",
+			transactions: map[string]transaction{
+				"plugin_a": {
+					prepareHooksReq: prepareHooksReq,
+					prepareHooksResp: &datapathplugins.PrepareCollectionResponse{
+						Cookie: "plugin_a_cookie",
+					},
+					loadHooksReq: &datapathplugins.InstrumentCollectionRequest{
+						Collection:        baseColl,
+						AttachmentContext: &datapathplugins.AttachmentContext{},
+						Cookie:            "plugin_a_cookie",
+					},
+					loadHooksResp: &datapathplugins.InstrumentCollectionResponse{},
+				},
+			},
+			attachmentPolicies: map[string]api_v2alpha1.CiliumDatapathPluginAttachmentPolicy{
+				"plugin_a": api_v2alpha1.AttachmentPolicyAlways,
+			},
+			expectedOutputValues: outputValues{
+				base: map[string]int32{
+					"program_tc_seq":  0,
+					"program_xdp_seq": 0,
+				},
+				returns: map[string]uint32{
+					"program_tc":  1,
+					"program_xdp": 1,
+				},
+			},
+			setup: func(t *testing.T, tmp string, txs map[string]transaction) {
+				m, err := ebpf.NewMap(&ebpf.MapSpec{
+					Type:       ebpf.Array,
+					KeySize:    4,
+					ValueSize:  4,
+					MaxEntries: 1,
+				})
+				require.NoError(t, err)
+				defer m.Close()
+
+				info, err := m.Info()
+				require.NoError(t, err)
+				mapID, _ := info.ID()
+
+				// Pin it so it stays alive in the kernel during the test
+				pinPath := filepath.Join(tmp, "custom_seq")
+				require.NoError(t, m.Pin(pinPath))
+
+				tx := txs["plugin_a"]
+				tx.prepareHooksResp.MapReplacements = []*datapathplugins.PrepareCollectionResponse_MapReplacement{
+					{
+						MapName: "seq",
+						MapId:   uint32(mapID),
+					},
+				}
+				txs["plugin_a"] = tx
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1100,6 +1158,10 @@ func TestPrivilegedLoadAndAssignWithPlugins(t *testing.T) {
 			tmp := testutils.TempBPFFS(t)
 			plugins := fakePluginRegistry{}
 			defer plugins.closeAll()
+
+			if tc.setup != nil {
+				tc.setup(t, tmp, tc.transactions)
+			}
 
 			for p, t := range tc.transactions {
 				plugins[p] = &fakePlugin{

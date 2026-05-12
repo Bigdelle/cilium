@@ -156,6 +156,13 @@ message PrepareCollectionResponse {
         repeated OrderingConstraint constraints = 3;
     }
 
+    message MapReplacement {
+        // name of the map in the collection to replace.
+        string map_name = 1;
+        // kernel map ID of the replacement map.
+        uint32 map_id = 2;
+    }
+
     // list of hooks that should be added to the collection.
     repeated HookSpec hooks = 1;
     // cookie is an opaque string that will be passed in the subsequent
@@ -163,6 +170,10 @@ message PrepareCollectionResponse {
     // may be used by plugins to associate the two requests or carry metadata
     // between them.
     string cookie = 2;
+    // map_replacements instructs Cilium to substitute standard maps defined in
+    // the base collection with custom, plugin-supplied maps using their kernel Map IDs.
+    // The replacement maps must be persistently pinned and kept alive by the plugin itself.
+    repeated MapReplacement map_replacements = 3;
 }
 
 // Phase 2: Cilium has constructed and loaded the collection along with any

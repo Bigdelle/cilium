@@ -207,17 +207,19 @@ func (l *bpfCollectionLoader) Load(ctx context.Context, logger *slog.Logger, spe
 		return coll, commit, func() {}, err
 	}
 
-	instrumentCollectionRequests, err := l.prepareCollection(ctx, logger, spec, opts, lnc, attachmentContext)
+	instrumentCollectionRequests, cleanupMaps, err := l.prepareCollection(ctx, logger, spec, opts, lnc, attachmentContext)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("preparing hooks: %w", err)
 	}
 
 	coll, commit, err = bpf.LoadCollection(logger, spec, opts)
 	if err != nil {
+		cleanupMaps()
 		return nil, nil, nil, fmt.Errorf("loading collection: %w", err)
 	}
 	defer func() {
 		if err != nil {
+			cleanupMaps()
 			coll.Close()
 		}
 	}()
@@ -227,13 +229,31 @@ func (l *bpfCollectionLoader) Load(ctx context.Context, logger *slog.Logger, spe
 		return coll, commit, nil, fmt.Errorf("loading hooks: %w", err)
 	}
 
-	return coll, commit, cleanup, nil
+	cleanupAll := func() {
+		cleanup()
+		cleanupMaps()
+	}
+
+	return coll, commit, cleanupAll, nil
 }
 
 // prepareCollection sends a round of PrepareCollection requests to all
 // registered plugins and prepares a set of InstrumentCollection requests for
 // the instrumentation/load phase.
-func (l *bpfCollectionLoader) prepareCollection(ctx context.Context, logger *slog.Logger, spec *ebpf.CollectionSpec, opts *bpf.CollectionOptions, lnc *config.Config, attachmentContext *datapathplugins.AttachmentContext) (_ map[string]*datapathplugins.InstrumentCollectionRequest, err error) {
+func (l *bpfCollectionLoader) prepareCollection(ctx context.Context, logger *slog.Logger, spec *ebpf.CollectionSpec, opts *bpf.CollectionOptions, lnc *config.Config, attachmentContext *datapathplugins.AttachmentContext) (_ map[string]*datapathplugins.InstrumentCollectionRequest, _ func(), err error) {
+	var loadedMaps []*ebpf.Map
+	cleanupMaps := func() {
+		for _, m := range loadedMaps {
+			m.Close()
+		}
+	}
+
+	defer func() {
+		if err != nil {
+			cleanupMaps()
+		}
+	}()
+
 	req := &datapathplugins.PrepareCollectionRequest{
 		AttachmentContext: attachmentContext,
 		Collection: &datapathplugins.PrepareCollectionRequest_CollectionSpec{
@@ -284,7 +304,7 @@ func (l *bpfCollectionLoader) prepareCollection(ctx context.Context, logger *slo
 		select {
 		case r = <-prepareResults:
 		case <-ctx.Done():
-			return nil, fmt.Errorf("waiting for PrepareCollection() responses: %w", ctx.Err())
+			return nil, nil, fmt.Errorf("waiting for PrepareCollection() responses: %w", ctx.Err())
 		}
 
 		logger.Debug("PrepareCollection()",
@@ -304,6 +324,42 @@ func (l *bpfCollectionLoader) prepareCollection(ctx context.Context, logger *slo
 			continue
 		} else {
 			responses[r.plugin.Name()] = r.resp
+		}
+
+		for _, mr := range r.resp.MapReplacements {
+			expectedSpec := spec.Maps[mr.MapName]
+			if expectedSpec == nil {
+				err = errors.Join(err, fmt.Errorf("%s: PrepareCollection(): target map \"%s\" does not exist in the collection spec", r.plugin.Name(), mr.MapName))
+				continue
+			}
+
+			if opts.CollectionOptions.MapReplacements != nil && opts.CollectionOptions.MapReplacements[mr.MapName] != nil {
+				err = errors.Join(err, fmt.Errorf("%s: PrepareCollection(): conflicting map replacement for symbol \"%s\" already replaced by a preceding plugin", r.plugin.Name(), mr.MapName))
+				continue
+			}
+
+			replacementMap, loadErr := ebpf.NewMapFromID(ebpf.MapID(mr.MapId))
+			if loadErr != nil {
+				err = errors.Join(err, fmt.Errorf("%s: PrepareCollection(): loading replacement map \"%s\" from ID %d: %w", r.plugin.Name(), mr.MapName, mr.MapId, loadErr))
+				continue
+			}
+			loadedMaps = append(loadedMaps, replacementMap)
+
+			// Validate signature
+			if replacementMap.Type() != expectedSpec.Type ||
+				replacementMap.KeySize() != expectedSpec.KeySize ||
+				replacementMap.ValueSize() != expectedSpec.ValueSize {
+				err = errors.Join(err, fmt.Errorf("%s: PrepareCollection(): replacement map \"%s\" (ID %d) has incompatible signature: got (type=%s, key=%d, value=%d), expected (type=%s, key=%d, value=%d)",
+					r.plugin.Name(), mr.MapName, mr.MapId,
+					replacementMap.Type(), replacementMap.KeySize(), replacementMap.ValueSize(),
+					expectedSpec.Type, expectedSpec.KeySize, expectedSpec.ValueSize))
+				continue
+			}
+
+			if opts.CollectionOptions.MapReplacements == nil {
+				opts.CollectionOptions.MapReplacements = make(map[string]*ebpf.Map)
+			}
+			opts.CollectionOptions.MapReplacements[mr.MapName] = replacementMap
 		}
 
 	process_hooks:
@@ -347,12 +403,12 @@ func (l *bpfCollectionLoader) prepareCollection(ctx context.Context, logger *slo
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	instrumentCollectionRequests, programPatches, err := hooksSpec.instrumentCollection(spec)
 	if err != nil {
-		return nil, fmt.Errorf("instrumenting collection: %w", err)
+		return nil, nil, fmt.Errorf("instrumenting collection: %w", err)
 	}
 	opts.ProgramPatches = programPatches
 
@@ -366,7 +422,7 @@ func (l *bpfCollectionLoader) prepareCollection(ctx context.Context, logger *slo
 		req.AttachmentContext = attachmentContext
 	}
 
-	return instrumentCollectionRequests, nil
+	return instrumentCollectionRequests, cleanupMaps, nil
 }
 
 // canInstrument makes sure that a hook can be added to the requested program.

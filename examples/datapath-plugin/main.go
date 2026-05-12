@@ -42,8 +42,37 @@ func main() {
 
 	logger := slog.Default()
 	logger.Info("Starting plugin server", logKeyListenPath, *unixSocketPath)
+
+	// Create custom replacement map for cilium_metrics demonstration
+	customMap, err := ebpf.NewMap(&ebpf.MapSpec{
+		Type:       ebpf.PerCPUHash,
+		KeySize:    8,
+		ValueSize:  16,
+		MaxEntries: 1024,
+	})
+	if err != nil {
+		logger.Error("Failed to create custom replacement map", logKeyError, err)
+		os.Exit(1)
+	}
+	defer customMap.Close()
+
+	info, err := customMap.Info()
+	if err != nil {
+		logger.Error("Failed to get info for custom replacement map", logKeyError, err)
+		os.Exit(1)
+	}
+	mapID, _ := info.ID()
+
+	// Persistently pin the map on startup to anchor its reference count
+	pinPath := "/sys/fs/bpf/tc/globals/my_custom_metrics"
+	os.Remove(pinPath)
+	if err := customMap.Pin(pinPath); err != nil {
+		logger.Error("Failed to pin custom replacement map", logKeyError, err)
+		os.Exit(1)
+	}
+
 	os.Remove(*unixSocketPath)
-	err := runServer(logger, *unixSocketPath)
+	err = runServer(logger, *unixSocketPath, uint32(mapID))
 	logger.Error("Plugin server stopped",
 		logKeyError, err,
 	)
@@ -53,7 +82,7 @@ func main() {
 	}
 }
 
-func runServer(logger *slog.Logger, sockPath string) error {
+func runServer(logger *slog.Logger, sockPath string, metricsMapID uint32) error {
 	addr, err := net.ResolveUnixAddr("unix", sockPath)
 	if err != nil {
 		return fmt.Errorf("resolving address: %w", err)
@@ -63,7 +92,7 @@ func runServer(logger *slog.Logger, sockPath string) error {
 		return fmt.Errorf("starting listener: %w", err)
 	}
 
-	dps, err := newDatapathPluginServer(logger)
+	dps, err := newDatapathPluginServer(logger, metricsMapID)
 	if err != nil {
 		return fmt.Errorf("creating server: %w", err)
 	}
@@ -75,12 +104,14 @@ func runServer(logger *slog.Logger, sockPath string) error {
 }
 
 type datapathPluginServer struct {
-	logger *slog.Logger
+	logger       *slog.Logger
+	metricsMapID uint32
 }
 
-func newDatapathPluginServer(logger *slog.Logger) (*datapathPluginServer, error) {
+func newDatapathPluginServer(logger *slog.Logger, metricsMapID uint32) (*datapathPluginServer, error) {
 	s := &datapathPluginServer{
-		logger: logger,
+		logger:       logger,
+		metricsMapID: metricsMapID,
 	}
 
 	return s, nil
@@ -107,10 +138,16 @@ func (s *datapathPluginServer) PrepareCollection(ctx context.Context, req *datap
 		return nil, nil
 	}
 
+	replacement := &datapathplugins.PrepareCollectionResponse_MapReplacement{
+		MapName: "cilium_metrics",
+		MapId:   s.metricsMapID,
+	}
+
 	id := uuid.New().String()
 	resp := &datapathplugins.PrepareCollectionResponse{
-		Hooks:  hooks,
-		Cookie: id,
+		Hooks:           hooks,
+		Cookie:          id,
+		MapReplacements: []*datapathplugins.PrepareCollectionResponse_MapReplacement{replacement},
 	}
 
 	s.logger.Info("PrepareCollection()",

@@ -348,9 +348,13 @@ type PrepareCollectionResponse struct {
 	// InstrumentCollectionRequest related to this PrepareCollectionRequest. It
 	// may be used by plugins to associate the two requests or carry metadata
 	// between them.
-	Cookie        string `protobuf:"bytes,2,opt,name=cookie,proto3" json:"cookie,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Cookie string `protobuf:"bytes,2,opt,name=cookie,proto3" json:"cookie,omitempty"`
+	// map_replacements instructs Cilium to substitute standard maps defined in
+	// the base collection with custom, plugin-supplied maps using their kernel Map IDs.
+	// The replacement maps must be persistently pinned and kept alive by the plugin itself.
+	MapReplacements []*PrepareCollectionResponse_MapReplacement `protobuf:"bytes,3,rep,name=map_replacements,json=mapReplacements,proto3" json:"map_replacements,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PrepareCollectionResponse) Reset() {
@@ -395,6 +399,13 @@ func (x *PrepareCollectionResponse) GetCookie() string {
 		return x.Cookie
 	}
 	return ""
+}
+
+func (x *PrepareCollectionResponse) GetMapReplacements() []*PrepareCollectionResponse_MapReplacement {
+	if x != nil {
+		return x.MapReplacements
+	}
+	return nil
 }
 
 // Phase 2: Cilium has constructed and loaded the collection along with any
@@ -1190,6 +1201,60 @@ func (x *PrepareCollectionResponse_HookSpec) GetConstraints() []*PrepareCollecti
 	return nil
 }
 
+type PrepareCollectionResponse_MapReplacement struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name of the map in the collection to replace.
+	MapName string `protobuf:"bytes,1,opt,name=map_name,json=mapName,proto3" json:"map_name,omitempty"`
+	// kernel map ID of the replacement map.
+	MapId         uint32 `protobuf:"varint,2,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PrepareCollectionResponse_MapReplacement) Reset() {
+	*x = PrepareCollectionResponse_MapReplacement{}
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareCollectionResponse_MapReplacement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareCollectionResponse_MapReplacement) ProtoMessage() {}
+
+func (x *PrepareCollectionResponse_MapReplacement) ProtoReflect() protoreflect.Message {
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareCollectionResponse_MapReplacement.ProtoReflect.Descriptor instead.
+func (*PrepareCollectionResponse_MapReplacement) Descriptor() ([]byte, []int) {
+	return file_datapathplugins_datapathplugins_proto_rawDescGZIP(), []int{2, 1}
+}
+
+func (x *PrepareCollectionResponse_MapReplacement) GetMapName() string {
+	if x != nil {
+		return x.MapName
+	}
+	return ""
+}
+
+func (x *PrepareCollectionResponse_MapReplacement) GetMapId() uint32 {
+	if x != nil {
+		return x.MapId
+	}
+	return 0
+}
+
 // An OrderingConstraint is a constraint about where this hook should
 // go at this hook point relative to other plugins' hooks.
 type PrepareCollectionResponse_HookSpec_OrderingConstraint struct {
@@ -1202,7 +1267,7 @@ type PrepareCollectionResponse_HookSpec_OrderingConstraint struct {
 
 func (x *PrepareCollectionResponse_HookSpec_OrderingConstraint) Reset() {
 	*x = PrepareCollectionResponse_HookSpec_OrderingConstraint{}
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[19]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1214,7 +1279,7 @@ func (x *PrepareCollectionResponse_HookSpec_OrderingConstraint) String() string 
 func (*PrepareCollectionResponse_HookSpec_OrderingConstraint) ProtoMessage() {}
 
 func (x *PrepareCollectionResponse_HookSpec_OrderingConstraint) ProtoReflect() protoreflect.Message {
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[19]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1257,7 +1322,7 @@ type InstrumentCollectionRequest_Collection struct {
 
 func (x *InstrumentCollectionRequest_Collection) Reset() {
 	*x = InstrumentCollectionRequest_Collection{}
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[20]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1269,7 +1334,7 @@ func (x *InstrumentCollectionRequest_Collection) String() string {
 func (*InstrumentCollectionRequest_Collection) ProtoMessage() {}
 
 func (x *InstrumentCollectionRequest_Collection) ProtoReflect() protoreflect.Message {
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[20]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1316,7 +1381,7 @@ type InstrumentCollectionRequest_Hook struct {
 
 func (x *InstrumentCollectionRequest_Hook) Reset() {
 	*x = InstrumentCollectionRequest_Hook{}
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[21]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1328,7 +1393,7 @@ func (x *InstrumentCollectionRequest_Hook) String() string {
 func (*InstrumentCollectionRequest_Hook) ProtoMessage() {}
 
 func (x *InstrumentCollectionRequest_Hook) ProtoReflect() protoreflect.Message {
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[21]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1381,7 +1446,7 @@ type InstrumentCollectionRequest_Collection_Program struct {
 
 func (x *InstrumentCollectionRequest_Collection_Program) Reset() {
 	*x = InstrumentCollectionRequest_Collection_Program{}
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[22]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1393,7 +1458,7 @@ func (x *InstrumentCollectionRequest_Collection_Program) String() string {
 func (*InstrumentCollectionRequest_Collection_Program) ProtoMessage() {}
 
 func (x *InstrumentCollectionRequest_Collection_Program) ProtoReflect() protoreflect.Message {
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[22]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1425,7 +1490,7 @@ type InstrumentCollectionRequest_Collection_Map struct {
 
 func (x *InstrumentCollectionRequest_Collection_Map) Reset() {
 	*x = InstrumentCollectionRequest_Collection_Map{}
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[23]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1437,7 +1502,7 @@ func (x *InstrumentCollectionRequest_Collection_Map) String() string {
 func (*InstrumentCollectionRequest_Collection_Map) ProtoMessage() {}
 
 func (x *InstrumentCollectionRequest_Collection_Map) ProtoReflect() protoreflect.Message {
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[23]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1472,7 +1537,7 @@ type InstrumentCollectionRequest_Hook_AttachTarget struct {
 
 func (x *InstrumentCollectionRequest_Hook_AttachTarget) Reset() {
 	*x = InstrumentCollectionRequest_Hook_AttachTarget{}
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[26]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1484,7 +1549,7 @@ func (x *InstrumentCollectionRequest_Hook_AttachTarget) String() string {
 func (*InstrumentCollectionRequest_Hook_AttachTarget) ProtoMessage() {}
 
 func (x *InstrumentCollectionRequest_Hook_AttachTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[26]
+	mi := &file_datapathplugins_datapathplugins_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1574,10 +1639,11 @@ const file_datapathplugins_datapathplugins_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2D.datapathplugins.PrepareCollectionRequest.CollectionSpec.ProgramSpecR\x05value:\x028\x01\x1ay\n" +
 	"\tMapsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12V\n" +
-	"\x05value\x18\x02 \x01(\v2@.datapathplugins.PrepareCollectionRequest.CollectionSpec.MapSpecR\x05value:\x028\x01\"\xfc\x03\n" +
+	"\x05value\x18\x02 \x01(\v2@.datapathplugins.PrepareCollectionRequest.CollectionSpec.MapSpecR\x05value:\x028\x01\"\xa6\x05\n" +
 	"\x19PrepareCollectionResponse\x12I\n" +
 	"\x05hooks\x18\x01 \x03(\v23.datapathplugins.PrepareCollectionResponse.HookSpecR\x05hooks\x12\x16\n" +
-	"\x06cookie\x18\x02 \x01(\tR\x06cookie\x1a\xfb\x02\n" +
+	"\x06cookie\x18\x02 \x01(\tR\x06cookie\x12d\n" +
+	"\x10map_replacements\x18\x03 \x03(\v29.datapathplugins.PrepareCollectionResponse.MapReplacementR\x0fmapReplacements\x1a\xfb\x02\n" +
 	"\bHookSpec\x12-\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x19.datapathplugins.HookTypeR\x04type\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x12h\n" +
@@ -1589,7 +1655,10 @@ const file_datapathplugins_datapathplugins_proto_rawDesc = "" +
 	"\aUNKNOWN\x10\x00\x12\n" +
 	"\n" +
 	"\x06BEFORE\x10\x01\x12\t\n" +
-	"\x05AFTER\x10\x02\"\xfd\b\n" +
+	"\x05AFTER\x10\x02\x1aB\n" +
+	"\x0eMapReplacement\x12\x19\n" +
+	"\bmap_name\x18\x01 \x01(\tR\amapName\x12\x15\n" +
+	"\x06map_id\x18\x02 \x01(\rR\x05mapId\"\xfd\b\n" +
 	"\x1bInstrumentCollectionRequest\x12W\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\v27.datapathplugins.InstrumentCollectionRequest.CollectionR\n" +
@@ -1644,7 +1713,7 @@ func file_datapathplugins_datapathplugins_proto_rawDescGZIP() []byte {
 }
 
 var file_datapathplugins_datapathplugins_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_datapathplugins_datapathplugins_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_datapathplugins_datapathplugins_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_datapathplugins_datapathplugins_proto_goTypes = []any{
 	(HookType)(0), // 0: datapathplugins.HookType
 	(PrepareCollectionResponse_HookSpec_OrderingConstraint_Order)(0), // 1: datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint.Order
@@ -1667,15 +1736,16 @@ var file_datapathplugins_datapathplugins_proto_goTypes = []any{
 	nil, // 18: datapathplugins.PrepareCollectionRequest.CollectionSpec.ProgramsEntry
 	nil, // 19: datapathplugins.PrepareCollectionRequest.CollectionSpec.MapsEntry
 	(*PrepareCollectionResponse_HookSpec)(nil),                    // 20: datapathplugins.PrepareCollectionResponse.HookSpec
-	(*PrepareCollectionResponse_HookSpec_OrderingConstraint)(nil), // 21: datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint
-	(*InstrumentCollectionRequest_Collection)(nil),                // 22: datapathplugins.InstrumentCollectionRequest.Collection
-	(*InstrumentCollectionRequest_Hook)(nil),                      // 23: datapathplugins.InstrumentCollectionRequest.Hook
-	(*InstrumentCollectionRequest_Collection_Program)(nil),        // 24: datapathplugins.InstrumentCollectionRequest.Collection.Program
-	(*InstrumentCollectionRequest_Collection_Map)(nil),            // 25: datapathplugins.InstrumentCollectionRequest.Collection.Map
-	nil, // 26: datapathplugins.InstrumentCollectionRequest.Collection.ProgramsEntry
-	nil, // 27: datapathplugins.InstrumentCollectionRequest.Collection.MapsEntry
-	(*InstrumentCollectionRequest_Hook_AttachTarget)(nil), // 28: datapathplugins.InstrumentCollectionRequest.Hook.AttachTarget
-	(*anypb.Any)(nil), // 29: google.protobuf.Any
+	(*PrepareCollectionResponse_MapReplacement)(nil),              // 21: datapathplugins.PrepareCollectionResponse.MapReplacement
+	(*PrepareCollectionResponse_HookSpec_OrderingConstraint)(nil), // 22: datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint
+	(*InstrumentCollectionRequest_Collection)(nil),                // 23: datapathplugins.InstrumentCollectionRequest.Collection
+	(*InstrumentCollectionRequest_Hook)(nil),                      // 24: datapathplugins.InstrumentCollectionRequest.Hook
+	(*InstrumentCollectionRequest_Collection_Program)(nil),        // 25: datapathplugins.InstrumentCollectionRequest.Collection.Program
+	(*InstrumentCollectionRequest_Collection_Map)(nil),            // 26: datapathplugins.InstrumentCollectionRequest.Collection.Map
+	nil, // 27: datapathplugins.InstrumentCollectionRequest.Collection.ProgramsEntry
+	nil, // 28: datapathplugins.InstrumentCollectionRequest.Collection.MapsEntry
+	(*InstrumentCollectionRequest_Hook_AttachTarget)(nil), // 29: datapathplugins.InstrumentCollectionRequest.Hook.AttachTarget
+	(*anypb.Any)(nil), // 30: google.protobuf.Any
 }
 var file_datapathplugins_datapathplugins_proto_depIdxs = []int32{
 	9,  // 0: datapathplugins.AttachmentContext.host:type_name -> datapathplugins.AttachmentContext.Host
@@ -1686,40 +1756,41 @@ var file_datapathplugins_datapathplugins_proto_depIdxs = []int32{
 	14, // 5: datapathplugins.AttachmentContext.xdp:type_name -> datapathplugins.AttachmentContext.XDP
 	15, // 6: datapathplugins.PrepareCollectionRequest.collection:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec
 	2,  // 7: datapathplugins.PrepareCollectionRequest.attachment_context:type_name -> datapathplugins.AttachmentContext
-	29, // 8: datapathplugins.PrepareCollectionRequest.config:type_name -> google.protobuf.Any
+	30, // 8: datapathplugins.PrepareCollectionRequest.config:type_name -> google.protobuf.Any
 	20, // 9: datapathplugins.PrepareCollectionResponse.hooks:type_name -> datapathplugins.PrepareCollectionResponse.HookSpec
-	22, // 10: datapathplugins.InstrumentCollectionRequest.collection:type_name -> datapathplugins.InstrumentCollectionRequest.Collection
-	2,  // 11: datapathplugins.InstrumentCollectionRequest.attachment_context:type_name -> datapathplugins.AttachmentContext
-	29, // 12: datapathplugins.InstrumentCollectionRequest.config:type_name -> google.protobuf.Any
-	23, // 13: datapathplugins.InstrumentCollectionRequest.hooks:type_name -> datapathplugins.InstrumentCollectionRequest.Hook
-	7,  // 14: datapathplugins.AttachmentContext.Host.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
-	7,  // 15: datapathplugins.AttachmentContext.LXC.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
-	8,  // 16: datapathplugins.AttachmentContext.LXC.pod_info:type_name -> datapathplugins.AttachmentContext.PodInfo
-	7,  // 17: datapathplugins.AttachmentContext.Overlay.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
-	7,  // 18: datapathplugins.AttachmentContext.Wireguard.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
-	7,  // 19: datapathplugins.AttachmentContext.XDP.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
-	18, // 20: datapathplugins.PrepareCollectionRequest.CollectionSpec.programs:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec.ProgramsEntry
-	19, // 21: datapathplugins.PrepareCollectionRequest.CollectionSpec.maps:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec.MapsEntry
-	16, // 22: datapathplugins.PrepareCollectionRequest.CollectionSpec.ProgramsEntry.value:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec.ProgramSpec
-	17, // 23: datapathplugins.PrepareCollectionRequest.CollectionSpec.MapsEntry.value:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec.MapSpec
-	0,  // 24: datapathplugins.PrepareCollectionResponse.HookSpec.type:type_name -> datapathplugins.HookType
-	21, // 25: datapathplugins.PrepareCollectionResponse.HookSpec.constraints:type_name -> datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint
-	1,  // 26: datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint.order:type_name -> datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint.Order
-	26, // 27: datapathplugins.InstrumentCollectionRequest.Collection.programs:type_name -> datapathplugins.InstrumentCollectionRequest.Collection.ProgramsEntry
-	27, // 28: datapathplugins.InstrumentCollectionRequest.Collection.maps:type_name -> datapathplugins.InstrumentCollectionRequest.Collection.MapsEntry
-	0,  // 29: datapathplugins.InstrumentCollectionRequest.Hook.type:type_name -> datapathplugins.HookType
-	28, // 30: datapathplugins.InstrumentCollectionRequest.Hook.attach_target:type_name -> datapathplugins.InstrumentCollectionRequest.Hook.AttachTarget
-	24, // 31: datapathplugins.InstrumentCollectionRequest.Collection.ProgramsEntry.value:type_name -> datapathplugins.InstrumentCollectionRequest.Collection.Program
-	25, // 32: datapathplugins.InstrumentCollectionRequest.Collection.MapsEntry.value:type_name -> datapathplugins.InstrumentCollectionRequest.Collection.Map
-	3,  // 33: datapathplugins.DatapathPlugin.PrepareCollection:input_type -> datapathplugins.PrepareCollectionRequest
-	5,  // 34: datapathplugins.DatapathPlugin.InstrumentCollection:input_type -> datapathplugins.InstrumentCollectionRequest
-	4,  // 35: datapathplugins.DatapathPlugin.PrepareCollection:output_type -> datapathplugins.PrepareCollectionResponse
-	6,  // 36: datapathplugins.DatapathPlugin.InstrumentCollection:output_type -> datapathplugins.InstrumentCollectionResponse
-	35, // [35:37] is the sub-list for method output_type
-	33, // [33:35] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	21, // 10: datapathplugins.PrepareCollectionResponse.map_replacements:type_name -> datapathplugins.PrepareCollectionResponse.MapReplacement
+	23, // 11: datapathplugins.InstrumentCollectionRequest.collection:type_name -> datapathplugins.InstrumentCollectionRequest.Collection
+	2,  // 12: datapathplugins.InstrumentCollectionRequest.attachment_context:type_name -> datapathplugins.AttachmentContext
+	30, // 13: datapathplugins.InstrumentCollectionRequest.config:type_name -> google.protobuf.Any
+	24, // 14: datapathplugins.InstrumentCollectionRequest.hooks:type_name -> datapathplugins.InstrumentCollectionRequest.Hook
+	7,  // 15: datapathplugins.AttachmentContext.Host.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
+	7,  // 16: datapathplugins.AttachmentContext.LXC.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
+	8,  // 17: datapathplugins.AttachmentContext.LXC.pod_info:type_name -> datapathplugins.AttachmentContext.PodInfo
+	7,  // 18: datapathplugins.AttachmentContext.Overlay.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
+	7,  // 19: datapathplugins.AttachmentContext.Wireguard.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
+	7,  // 20: datapathplugins.AttachmentContext.XDP.iface:type_name -> datapathplugins.AttachmentContext.InterfaceInfo
+	18, // 21: datapathplugins.PrepareCollectionRequest.CollectionSpec.programs:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec.ProgramsEntry
+	19, // 22: datapathplugins.PrepareCollectionRequest.CollectionSpec.maps:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec.MapsEntry
+	16, // 23: datapathplugins.PrepareCollectionRequest.CollectionSpec.ProgramsEntry.value:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec.ProgramSpec
+	17, // 24: datapathplugins.PrepareCollectionRequest.CollectionSpec.MapsEntry.value:type_name -> datapathplugins.PrepareCollectionRequest.CollectionSpec.MapSpec
+	0,  // 25: datapathplugins.PrepareCollectionResponse.HookSpec.type:type_name -> datapathplugins.HookType
+	22, // 26: datapathplugins.PrepareCollectionResponse.HookSpec.constraints:type_name -> datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint
+	1,  // 27: datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint.order:type_name -> datapathplugins.PrepareCollectionResponse.HookSpec.OrderingConstraint.Order
+	27, // 28: datapathplugins.InstrumentCollectionRequest.Collection.programs:type_name -> datapathplugins.InstrumentCollectionRequest.Collection.ProgramsEntry
+	28, // 29: datapathplugins.InstrumentCollectionRequest.Collection.maps:type_name -> datapathplugins.InstrumentCollectionRequest.Collection.MapsEntry
+	0,  // 30: datapathplugins.InstrumentCollectionRequest.Hook.type:type_name -> datapathplugins.HookType
+	29, // 31: datapathplugins.InstrumentCollectionRequest.Hook.attach_target:type_name -> datapathplugins.InstrumentCollectionRequest.Hook.AttachTarget
+	25, // 32: datapathplugins.InstrumentCollectionRequest.Collection.ProgramsEntry.value:type_name -> datapathplugins.InstrumentCollectionRequest.Collection.Program
+	26, // 33: datapathplugins.InstrumentCollectionRequest.Collection.MapsEntry.value:type_name -> datapathplugins.InstrumentCollectionRequest.Collection.Map
+	3,  // 34: datapathplugins.DatapathPlugin.PrepareCollection:input_type -> datapathplugins.PrepareCollectionRequest
+	5,  // 35: datapathplugins.DatapathPlugin.InstrumentCollection:input_type -> datapathplugins.InstrumentCollectionRequest
+	4,  // 36: datapathplugins.DatapathPlugin.PrepareCollection:output_type -> datapathplugins.PrepareCollectionResponse
+	6,  // 37: datapathplugins.DatapathPlugin.InstrumentCollection:output_type -> datapathplugins.InstrumentCollectionResponse
+	36, // [36:38] is the sub-list for method output_type
+	34, // [34:36] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_datapathplugins_datapathplugins_proto_init() }
@@ -1741,7 +1812,7 @@ func file_datapathplugins_datapathplugins_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_datapathplugins_datapathplugins_proto_rawDesc), len(file_datapathplugins_datapathplugins_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
