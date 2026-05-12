@@ -895,7 +895,7 @@ func retValProceed(ps *ebpf.ProgramSpec) int32 {
 
 }
 
-// clamAndReturn makes sure the verifier's return value range check is satisfied
+// clampAndReturn makes sure the verifier's return value range check is satisfied
 // for certain attach types before exiting.
 //
 // https://github.com/torvalds/linux/blob/8a30aeb0d1b4e4aaf7f7bae72f20f2ae75385ccb/kernel/bpf/verifier.c#L17901

@@ -275,10 +275,10 @@ func (*AttachmentContext_Wireguard_) isAttachmentContext_Context() {}
 func (*AttachmentContext_Xdp) isAttachmentContext_Context() {}
 
 // Phase 1: As Cilium loads and prepares a collection for a particular
-// attachment point, it sends a PrepareHooksRequest to each plugin with context
+// attachment point, it sends a PrepareCollectionRequest to each plugin with context
 // about the attachment point, collection, and its configuration. The plugin
 // decides which hooks it would like to insert, where it would like to insert
-// them, and informs Cilium in the PrepareHooksResponse.
+// them, and informs Cilium in the PrepareCollectionResponse.
 type PrepareCollectionRequest struct {
 	state             protoimpl.MessageState                   `protogen:"open.v1"`
 	Collection        *PrepareCollectionRequest_CollectionSpec `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`

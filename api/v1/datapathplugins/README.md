@@ -337,10 +337,10 @@ Program and map IDs in the collection
 
 ### PrepareCollectionRequest
 Phase 1: As Cilium loads and prepares a collection for a particular
-attachment point, it sends a PrepareHooksRequest to each plugin with context
+attachment point, it sends a PrepareCollectionRequest to each plugin with context
 about the attachment point, collection, and its configuration. The plugin
 decides which hooks it would like to insert, where it would like to insert
-them, and informs Cilium in the PrepareHooksResponse.
+them, and informs Cilium in the PrepareCollectionResponse.
 
 
 | Field | Type | Label | Description |
