@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
-	"strconv"
 	"strings"
 
 	"github.com/cilium/cilium/pkg/option"
@@ -26,49 +25,48 @@ var (
 // For IPv6 addresses, it converts ":" into "-" as EndpointSelectors don't
 // support colons inside the name section of a label.
 func getCIDRLabel(prefix netip.Prefix) Label {
-	ipv6 := prefix.Addr().Is6()
-	ipStr := prefix.Masked().Addr().String()
-	prefixLen := prefix.Bits()
+	ip := prefix.Masked().Addr()
 
-	var str strings.Builder
-	str.Grow(
-		1 /* preZero */ +
-			len(ipStr) +
-			1 /* postZero */ +
-			2 /*len of prefix*/ +
-			1, /* '/' */
-	)
+	var outBuf [64]byte
+	out := outBuf[:0]
 
-	// Only scan bytes individually if needed (for an IPv6 address)
-	if ipv6 {
-		for i := range len(ipStr) {
-			if ipStr[i] == ':' {
+	if ip.Is6() {
+		var ipBuf [48]byte
+		raw := ip.AppendTo(ipBuf[:0])
+		for i, b := range raw {
+			if b == ':' {
 				// EndpointSelector keys can't start or end with a "-", so insert a
 				// zero at the start or end if it would otherwise have a "-" at that
 				// position.
 				if i == 0 {
-					str.WriteByte('0')
-					str.WriteByte('-')
+					out = append(out, '0', '-')
 					continue
 				}
-				if i == len(ipStr)-1 {
-					str.WriteByte('-')
-					str.WriteByte('0')
+				if i == len(raw)-1 {
+					out = append(out, '-', '0')
 					continue
 				}
-				str.WriteByte('-')
+				out = append(out, '-')
 			} else {
-				str.WriteByte(ipStr[i])
+				out = append(out, b)
 			}
 		}
 	} else {
-		str.WriteString(ipStr)
+		out = ip.AppendTo(out)
 	}
-	str.WriteRune('/')
-	str.WriteString(strconv.Itoa(prefixLen))
+
+	out = append(out, '/')
+	bits := prefix.Bits()
+	if bits >= 100 {
+		out = append(out, byte('0'+bits/100), byte('0'+(bits/10)%10), byte('0'+bits%10))
+	} else if bits >= 10 {
+		out = append(out, byte('0'+bits/10), byte('0'+bits%10))
+	} else {
+		out = append(out, byte('0'+bits))
+	}
 
 	return Label{
-		Key:    str.String(),
+		Key:    string(out),
 		Source: LabelSourceCIDR,
 		cidr:   &prefix,
 	}
