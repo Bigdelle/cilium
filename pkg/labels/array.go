@@ -255,14 +255,31 @@ func LabelArrayFromString(str string) LabelArray {
 }
 
 func (ls LabelArray) BuildString(sb *strings.Builder) {
-	sb.WriteString("[")
+	if len(ls) == 0 {
+		sb.WriteString("[]")
+		return
+	}
+
+	n := len(ls) + 1
+	for i := range ls {
+		if len(ls[i].Source) > 0 {
+			n += len(ls[i].Source) + 1
+		}
+		n += len(ls[i].Key)
+		if len(ls[i].Value) > 0 {
+			n += len(ls[i].Value) + 1
+		}
+	}
+	sb.Grow(n)
+
+	sb.WriteByte('[')
 	for l := range ls {
 		if l > 0 {
-			sb.WriteString(" ")
+			sb.WriteByte(' ')
 		}
 		ls[l].BuildString(sb)
 	}
-	sb.WriteString("]")
+	sb.WriteByte(']')
 }
 
 func (ls LabelArray) String() string {
