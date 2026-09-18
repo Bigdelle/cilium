@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/cilium/cilium/pkg/envoy/xds"
 	cilium "github.com/cilium/proxy/go/cilium/api"
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
@@ -18,8 +19,6 @@ import (
 	envoy_resource "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/cilium/cilium/pkg/envoy/xds"
 )
 
 type Resource interface {
@@ -27,20 +26,12 @@ type Resource interface {
 }
 
 func marshal(res Resource) (string, error) {
-	opts := protojson.MarshalOptions{UseProtoNames: true, Indent: ""}
+	opts := protojson.MarshalOptions{UseProtoNames: true}
 	data, err := opts.Marshal(res)
 	if err != nil {
 		return "", err
 	}
-
-	// Since protojson.Marshal does not produce stable output,
-	// this is a workaround to produce stable json output.
-	// See https://github.com/golang/protobuf/issues/1082
-	data2, err := json.Marshal(json.RawMessage(data))
-	if err != nil {
-		return "", err
-	}
-	return string(data2), nil
+	return string(data), nil
 }
 
 type serializedResource struct {
