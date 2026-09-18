@@ -10,6 +10,19 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/cilium/cilium/pkg/bpf"
+	"github.com/cilium/cilium/pkg/envoy/config"
+	envoypolicy "github.com/cilium/cilium/pkg/envoy/policy"
+	"github.com/cilium/cilium/pkg/identity"
+	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/maps/ipcache"
+	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/policy"
+	policyTypes "github.com/cilium/cilium/pkg/policy/types"
+	"github.com/cilium/cilium/pkg/proxy/endpoint"
+	syncnames "github.com/cilium/cilium/pkg/secretsync/names"
+	ciliumTypes "github.com/cilium/cilium/pkg/types"
+	"github.com/cilium/cilium/pkg/u8proto"
 	cilium "github.com/cilium/proxy/go/cilium/api"
 	envoy_config_core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_config_listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
@@ -24,20 +37,6 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/cilium/cilium/pkg/bpf"
-	"github.com/cilium/cilium/pkg/envoy/config"
-	envoypolicy "github.com/cilium/cilium/pkg/envoy/policy"
-	"github.com/cilium/cilium/pkg/identity"
-	"github.com/cilium/cilium/pkg/logging/logfields"
-	"github.com/cilium/cilium/pkg/maps/ipcache"
-	"github.com/cilium/cilium/pkg/option"
-	"github.com/cilium/cilium/pkg/policy"
-	policyTypes "github.com/cilium/cilium/pkg/policy/types"
-	"github.com/cilium/cilium/pkg/proxy/endpoint"
-	syncnames "github.com/cilium/cilium/pkg/secretsync/names"
-	ciliumTypes "github.com/cilium/cilium/pkg/types"
-	"github.com/cilium/cilium/pkg/u8proto"
 )
 
 var (
@@ -992,19 +991,28 @@ func GetHttpFilterChainProto(clusterName string, tls bool, isIngress bool, acces
 		xffNumTrustedHops = config.proxyXffNumTrustedHopsIngress
 	}
 
-	newHTTPRouteAction := func() *envoy_config_route.RouteAction {
-		action := &envoy_config_route.RouteAction{
-			ClusterSpecifier: &envoy_config_route.RouteAction_Cluster{
-				Cluster: clusterName,
-			},
-			Timeout:     &durationpb.Duration{Seconds: requestTimeout},
-			RetryPolicy: GetHTTPRetryPolicy(uint(config.httpRetryCount), uint(config.httpRetryTimeout)),
-		}
-		if idleTimeout > 0 {
-			action.IdleTimeout = &durationpb.Duration{Seconds: idleTimeout}
-		}
-		return action
+	clusterSpecifier := &envoy_config_route.RouteAction_Cluster{
+		Cluster: clusterName,
 	}
+	requestTimeoutDuration := &durationpb.Duration{Seconds: requestTimeout}
+	retryPolicy := GetHTTPRetryPolicy(uint(config.httpRetryCount), uint(config.httpRetryTimeout))
+
+	var idleTimeoutDuration *durationpb.Duration
+	if idleTimeout > 0 {
+		idleTimeoutDuration = &durationpb.Duration{Seconds: idleTimeout}
+	}
+
+	httpRouteAction := &envoy_config_route.RouteAction{
+		ClusterSpecifier: clusterSpecifier,
+		Timeout:          requestTimeoutDuration,
+		IdleTimeout:      idleTimeoutDuration,
+		RetryPolicy:      retryPolicy,
+	}
+	httpRoute := &envoy_config_route.Route_Route{
+		Route: httpRouteAction,
+	}
+
+	prefixSlash := &envoy_config_route.RouteMatch_Prefix{Prefix: "/"}
 
 	hcmConfig := &envoy_config_http.HttpConnectionManager{
 		StatPrefix: "proxy",
@@ -1041,33 +1049,27 @@ func GetHttpFilterChainProto(clusterName string, tls bool, isIngress bool, acces
 								ConnectMatcher: &envoy_config_route.RouteMatch_ConnectMatcher{},
 							},
 						},
-						Action: &envoy_config_route.Route_Route{
-							Route: newHTTPRouteAction(),
-						},
+						Action: httpRoute,
 					}, {
 						Match: &envoy_config_route.RouteMatch{
-							PathSpecifier: &envoy_config_route.RouteMatch_Prefix{Prefix: "/"},
+							PathSpecifier: prefixSlash,
 							Grpc:          &envoy_config_route.RouteMatch_GrpcRouteMatchOptions{},
 						},
 						Action: &envoy_config_route.Route_Route{
 							Route: &envoy_config_route.RouteAction{
-								ClusterSpecifier: &envoy_config_route.RouteAction_Cluster{
-									Cluster: clusterName,
-								},
-								Timeout: &durationpb.Duration{Seconds: requestTimeout},
+								ClusterSpecifier: clusterSpecifier,
+								Timeout:          requestTimeoutDuration,
 								MaxStreamDuration: &envoy_config_route.RouteAction_MaxStreamDuration{
 									GrpcTimeoutHeaderMax: &durationpb.Duration{Seconds: maxGRPCTimeout},
 								},
-								RetryPolicy: GetHTTPRetryPolicy(uint(config.httpRetryCount), uint(config.httpRetryTimeout)),
+								RetryPolicy: retryPolicy,
 							},
 						},
 					}, {
 						Match: &envoy_config_route.RouteMatch{
-							PathSpecifier: &envoy_config_route.RouteMatch_Prefix{Prefix: "/"},
+							PathSpecifier: prefixSlash,
 						},
-						Action: &envoy_config_route.Route_Route{
-							Route: newHTTPRouteAction(),
-						},
+						Action: httpRoute,
 					}},
 				}},
 			},
