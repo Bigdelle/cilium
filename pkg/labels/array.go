@@ -264,8 +264,35 @@ func (ls LabelArray) BuildString(sb *strings.Builder) {
 }
 
 func (ls LabelArray) String() string {
+	n := 2
+	for i := range ls {
+		if i > 0 {
+			n++
+		}
+		l := &ls[i]
+		n += len(l.Source) + len(SourceDelimiter) + len(l.Key)
+		if len(l.Value) != 0 {
+			n += 1 + len(l.Value)
+		}
+	}
+
 	var sb strings.Builder
-	ls.BuildString(&sb)
+	sb.Grow(n)
+	sb.WriteByte('[')
+	for i := range ls {
+		if i > 0 {
+			sb.WriteByte(' ')
+		}
+		l := &ls[i]
+		sb.WriteString(l.Source)
+		sb.WriteString(SourceDelimiter)
+		sb.WriteString(l.Key)
+		if len(l.Value) != 0 {
+			sb.WriteByte('=')
+			sb.WriteString(l.Value)
+		}
+	}
+	sb.WriteByte(']')
 	return sb.String()
 }
 
