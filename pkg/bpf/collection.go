@@ -11,21 +11,20 @@ import (
 	"math/bits"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"unsafe"
-
-	"golang.org/x/sys/cpu"
-
-	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/asm"
-	"github.com/cilium/ebpf/btf"
-	"golang.org/x/sys/unix"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/cilium/cilium/pkg/bpf/analyze"
 	"github.com/cilium/cilium/pkg/container/set"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/registry"
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/btf"
+	"golang.org/x/sys/cpu"
+	"golang.org/x/sys/unix"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 const (
@@ -68,10 +67,16 @@ func tailCallSlot(prog *ebpf.ProgramSpec) (uint32, error) {
 		return 0, fmt.Errorf("program %s has no function metadata", prog.Name)
 	}
 
+	prefix := "tail:" + callsMap + "/"
 	for _, tag := range fn.Tags {
-		var slot uint32
-		if _, err := fmt.Sscanf(tag, fmt.Sprintf("tail:%s/%%v", callsMap), &slot); err == nil {
-			return slot, nil
+		if strings.HasPrefix(tag, prefix) {
+			if slot, err := strconv.ParseUint(tag[len(prefix):], 10, 32); err == nil {
+				return uint32(slot), nil
+			}
+			var slot uint32
+			if _, err := fmt.Sscanf(tag, prefix+"%v", &slot); err == nil {
+				return slot, nil
+			}
 		}
 	}
 
