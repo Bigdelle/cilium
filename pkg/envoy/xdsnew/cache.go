@@ -13,6 +13,11 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cilium/cilium/pkg/completion"
+	"github.com/cilium/cilium/pkg/envoy/xds"
+	callbacks "github.com/cilium/cilium/pkg/envoy/xdsnew/callbacks"
+	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/davecgh/go-spew/spew"
 	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	envoy_config_core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -27,12 +32,6 @@ import (
 	envoy_resource "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/util/rand"
-
-	"github.com/cilium/cilium/pkg/completion"
-	"github.com/cilium/cilium/pkg/envoy/xds"
-	callbacks "github.com/cilium/cilium/pkg/envoy/xdsnew/callbacks"
-	"github.com/cilium/cilium/pkg/lock"
-	"github.com/cilium/cilium/pkg/logging/logfields"
 )
 
 const (
@@ -460,16 +459,34 @@ func sdsReferenceVersionContext(resources *xds.Resources) string {
 }
 
 func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_types.Resource, versionContext ...string) (string, error) {
-	keys := slices.Collect(maps.Keys(resources))
+	keys := make([]string, 0, len(resources))
+	for name := range resources {
+		keys = append(keys, name)
+	}
 	slices.Sort(keys)
-	var sb strings.Builder
-	for _, name := range keys {
+
+	encoded := make([]string, len(keys))
+	var totalLen int
+	for i, name := range keys {
 		encodedResource, err := marshal(resources[name])
 		if err != nil {
 			return "", err
 		}
+		encoded[i] = encodedResource
+		totalLen += len(name) + len(encodedResource)
+	}
+	for _, context := range versionContext {
+		if context == "" {
+			continue
+		}
+		totalLen += 1 + len("version-context") + 1 + len(context)
+	}
+
+	var sb strings.Builder
+	sb.Grow(totalLen)
+	for i, name := range keys {
 		sb.WriteString(name)
-		sb.WriteString(encodedResource)
+		sb.WriteString(encoded[i])
 	}
 	for _, context := range versionContext {
 		if context == "" {
