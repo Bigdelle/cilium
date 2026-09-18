@@ -263,11 +263,29 @@ func (s *prefixInfo) flatten(scopedLog *slog.Logger) *resourceInfo {
 		encryptKeyResourceID    ipcachetypes.ResourceID
 		requestedIDResourceID   ipcachetypes.ResourceID
 		endpointFlagsResourceID ipcachetypes.ResourceID
+
+		labelsResourceID ipcachetypes.ResourceID
+		labelResourceIDs map[string]ipcachetypes.ResourceID
+		labelsCopied     bool
 	)
 
-	labelResourceIDs := map[string]ipcachetypes.ResourceID{}
+	sortedIDs := make([]ipcachetypes.ResourceID, 0, len(s.byResource))
+	for id := range s.byResource {
+		sortedIDs = append(sortedIDs, id)
+	}
+	slices.SortStableFunc(sortedIDs, func(a, b ipcachetypes.ResourceID) int {
+		srcA := s.byResource[a].source
+		srcB := s.byResource[b].source
+		if srcA != srcB {
+			if !source.AllowOverwrite(srcA, srcB) {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(string(a), string(b))
+	})
 
-	for _, resourceID := range s.sortedBySourceThenResourceID() {
+	for _, resourceID := range sortedIDs {
 		info := s.byResource[resourceID]
 
 		// Sorted by source priority, so the first source wins.
@@ -277,6 +295,12 @@ func (s *prefixInfo) flatten(scopedLog *slog.Logger) *resourceInfo {
 
 		if len(info.labels) > 0 && !out.identityOverride /* identityOverride already fixed the labels */ {
 			if len(out.labels) > 0 {
+				if labelResourceIDs == nil {
+					labelResourceIDs = make(map[string]ipcachetypes.ResourceID, len(out.labels)+len(info.labels))
+					for key := range out.labels {
+						labelResourceIDs[key] = labelsResourceID
+					}
+				}
 				// merge labels, complaining if the value exists
 				for key, newLabel := range info.labels {
 					otherLabel, exists := out.labels[key]
@@ -289,12 +313,17 @@ func (s *prefixInfo) flatten(scopedLog *slog.Logger) *resourceInfo {
 							logfields.ConflictingLabels, otherLabel,
 						)
 					} else if !exists {
+						if !labelsCopied {
+							out.labels = labels.NewFrom(out.labels)
+							labelsCopied = true
+						}
 						out.labels[key] = newLabel
 						labelResourceIDs[key] = resourceID
 					}
 				}
 			} else {
-				out.labels = labels.NewFrom(info.labels) // copy map, as we will be mutating it
+				out.labels = info.labels
+				labelsResourceID = resourceID
 			}
 		}
 
@@ -319,6 +348,7 @@ func (s *prefixInfo) flatten(scopedLog *slog.Logger) *resourceInfo {
 				} else {
 					out.identityOverride = true
 					out.labels = info.labels
+					labelsCopied = false
 					overrideResourceID = resourceID
 				}
 			}
@@ -391,6 +421,10 @@ func (s *prefixInfo) flatten(scopedLog *slog.Logger) *resourceInfo {
 				endpointFlagsResourceID = resourceID
 			}
 		}
+	}
+
+	if !labelsCopied && out.labels != nil {
+		out.labels = labels.NewFrom(out.labels)
 	}
 
 	return out
