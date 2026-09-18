@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"golang.org/x/sys/unix"
+	"slices"
 
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -67,16 +67,12 @@ func copyExistingState(oldDir, newDir string) error {
 		return fmt.Errorf("failed to list new endpoint state dir: %w", err)
 	}
 
-	newFilesHash := make(map[string]struct{}, len(newFiles))
-	for _, f := range newFiles {
-		newFilesHash[f] = struct{}{}
-	}
-
-	var ok bool
+	oldFd := int(oldDirFile.Fd())
+	newFd := int(newDirFile.Fd())
 
 	for _, oldFile := range oldFiles {
-		if _, ok = newFilesHash[oldFile]; !ok {
-			if err := os.Link(filepath.Join(oldDir, oldFile), filepath.Join(newDir, oldFile)); err != nil {
+		if !slices.Contains(newFiles, oldFile) {
+			if err := unix.Linkat(oldFd, oldFile, newFd, oldFile, 0); err != nil {
 				return fmt.Errorf("failed to move endpoint state file: %w", err)
 			}
 		}
