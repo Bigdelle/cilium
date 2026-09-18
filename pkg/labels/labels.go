@@ -719,26 +719,28 @@ func (l Label) formatForKVStoreInto(buf *bytes.Buffer) {
 // DO NOT BREAK THE FORMAT OF THIS. THE RETURNED STRING IS USED AS KEY IN
 // THE KEY-VALUE STORE.
 func (l Labels) SortedList() []byte {
-	keys := slices.Sorted(maps.Keys(l))
+	keys := make([]string, len(l))
+	totalLen := 0
+	i := 0
+	for k, v := range l {
+		keys[i] = k
+		i++
+		totalLen += len(v.Source) + len(v.Key) + len(v.Value) + 3
+	}
+	slices.Sort(keys)
 
-	// Labels can have arbitrary size. However, when many CIDR identities are in
-	// the system, for example due to a FQDN policy matching S3, CIDR labels
-	// dominate in number. IPv4 CIDR labels in serialized form are max 25 bytes
-	// long. Allocate slightly more to avoid having a realloc if there's some
-	// other labels which may longer, since the cost of allocating a few bytes
-	// more is dominated by a second allocation, especially since these
-	// allocations are short-lived.
-	//
-	// cidr:123.123.123.123/32=;
-	// 0        1         2
-	// 1234567890123456789012345
-	b := make([]byte, 0, len(keys)*30)
-	buf := bytes.NewBuffer(b)
+	res := make([]byte, 0, totalLen)
 	for _, k := range keys {
-		l[k].formatForKVStoreInto(buf)
+		v := l[k]
+		res = append(res, v.Source...)
+		res = append(res, byte(sourceDelimiter))
+		res = append(res, v.Key...)
+		res = append(res, '=')
+		res = append(res, v.Value...)
+		res = append(res, ';')
 	}
 
-	return buf.Bytes()
+	return res
 }
 
 // ToSlice returns a slice of label with the values of the given
