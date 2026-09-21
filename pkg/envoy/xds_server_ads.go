@@ -617,6 +617,11 @@ func (s *adsServer) UpdateNetworkPolicy(ctx context.Context, ep endpoint.Endpoin
 		s.localEndpointStore.setLocalEndpoint(ep)
 	}
 
+	var callbackTypeURLs map[string]func(error)
+	if waitForACK {
+		callbackTypeURLs = map[string]func(error){NetworkPolicyTypeURL: callback}
+	}
+
 	for _, nodeId := range nodeIDs {
 		resources := s.cache.GetAllResources(nodeId)
 		if resources == nil {
@@ -625,10 +630,6 @@ func (s *adsServer) UpdateNetworkPolicy(ctx context.Context, ep endpoint.Endpoin
 		resources = resources.DeepCopy()
 		oldPolicy, existed := resources.NetworkPolicies[resourceName]
 		resources.NetworkPolicies[resourceName] = networkPolicy
-		var callbackTypeURLs map[string]func(error)
-		if waitForACK {
-			callbackTypeURLs = map[string]func(error){NetworkPolicyTypeURL: callback}
-		}
 		if err := s.updateSnapshot(ctx, resources, nodeId, wg, callbackTypeURLs,
 			&resourceChanges{networkPolicies: []savedEntry[*cilium.NetworkPolicy]{{key: resourceName, value: oldPolicy, existed: existed}}}); err != nil {
 			return err, nil, nil
