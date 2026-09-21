@@ -238,8 +238,21 @@ func (h *dnsMessageHandler) logDNSMessage(
 	dnsMsgDetails *dnsproxy.MsgDetails,
 	stat *dnsproxy.ProxyRequestContext,
 ) error {
-	protoID := u8proto.ProtoIDs[strings.ToLower(flowInfo.protocol)]
-	ep.UpdateProxyStatistics("fqdn", strings.ToUpper(flowInfo.protocol), flowInfo.serverAddrPort.Port(), h.bindPort, false, !dnsMsgDetails.Response, flowInfo.verdict)
+	protoID, ok := u8proto.ProtoIDs[flowInfo.protocol]
+	if !ok {
+		protoID = u8proto.ProtoIDs[strings.ToLower(flowInfo.protocol)]
+	}
+
+	protoUpper := flowInfo.protocol
+	if protoUpper == "udp" {
+		protoUpper = "UDP"
+	} else if protoUpper == "tcp" {
+		protoUpper = "TCP"
+	} else {
+		protoUpper = strings.ToUpper(flowInfo.protocol)
+	}
+
+	ep.UpdateProxyStatistics("fqdn", protoUpper, flowInfo.serverAddrPort.Port(), h.bindPort, false, !dnsMsgDetails.Response, flowInfo.verdict)
 
 	// Ensure that there are no early returns from this function before the
 	// code below, otherwise the log record will not be made.
@@ -249,9 +262,6 @@ func (h *dnsMessageHandler) logDNSMessage(
 	logContext, lcncl := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer lcncl()
 	record, err := h.proxyAccessLogger.NewLogRecord(context.Background(), flowInfo.flowType, false,
-		func(lr *accesslog.LogRecord, _ accesslog.EndpointInfoRegistry) {
-			lr.TransportProtocol = accesslog.TransportProtocol(protoID)
-		},
 		accesslog.LogTags.Verdict(flowInfo.verdict, flowInfo.reason),
 		accesslog.LogTags.Addressing(logContext, flowInfo.addrInfo),
 		accesslog.LogTags.DNS(&accesslog.LogRecordDNS{
@@ -268,6 +278,8 @@ func (h *dnsMessageHandler) logDNSMessage(
 	if err != nil {
 		return fmt.Errorf("failed create log record: %w", err)
 	}
+
+	record.TransportProtocol = accesslog.TransportProtocol(protoID)
 
 	h.proxyAccessLogger.Log(record)
 
