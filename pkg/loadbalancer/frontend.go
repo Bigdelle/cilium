@@ -9,7 +9,6 @@ import (
 	"iter"
 	"slices"
 	"strings"
-	"unsafe"
 
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
@@ -279,15 +278,12 @@ var (
 //
 // Prefer [FrontendByAddress] over this.
 func LookupFrontendByTuple(txn statedb.ReadTxn, fes statedb.Table[*Frontend], addrCluster cmtypes.AddrCluster, proto L4Type, port uint16, scope uint8) (fe *Frontend, found bool) {
-	rep := l3n4AddrRep{
-		addrCluster: addrCluster,
-		L4Addr:      L4Addr{Protocol: proto, Port: port},
-		scope:       scope,
-	}
-	// Construct a temporary L3n4Addr without going via unique.Make.
-	h := &struct{ rep *l3n4AddrRep }{&rep}
-	l3n4Addr := (*L3n4Addr)(unsafe.Pointer(h))
-	fe, _, found = fes.Get(txn, FrontendByAddress(*l3n4Addr))
+	// Build the frontend address index key directly on the stack. [statedb.Table.Get]
+	// does not retain the query key, so it does not need to be heap-allocated
+	// or interned.
+	var key [l3n4AddrKeySize]byte
+	l3n4AddrKeyInto(&key, addrCluster, proto, port, scope)
+	fe, _, found = fes.Get(txn, frontendAddressIndex.QueryFromKey(index.Key(key[:])))
 	return
 }
 
