@@ -318,14 +318,18 @@ func (h *dnsMessageHandler) UpdateOnDNSMsg(lookupTime time.Time, ep *endpoint.En
 	stat.QnameLockTime.End(true)
 
 	if d := time.Since(mutexAcquireStart); d >= option.Config.DNSProxyLockTimeout {
-		h.logger.Warn(fmt.Sprintf("Name lock acquisition time took longer than expected. Potentially too many parallel DNS requests being processed, consider adjusting --%s and/or --%s", option.DNSProxyLockCount, option.DNSProxyLockTimeout),
-			logfields.DNSName, qname,
-			logfields.Duration, d,
-			logfields.Expected, option.Config.DNSProxyLockTimeout,
-		)
+		if h.logger.Enabled(context.TODO(), slog.LevelWarn) {
+			h.logger.Warn(fmt.Sprintf("Name lock acquisition time took longer than expected. Potentially too many parallel DNS requests being processed, consider adjusting --%s and/or --%s", option.DNSProxyLockCount, option.DNSProxyLockTimeout),
+				logfields.DNSName, qname,
+				logfields.Duration, d,
+				logfields.Expected, option.Config.DNSProxyLockTimeout,
+			)
+		}
 	}
 
-	h.logger.Debug("Recording DNS lookup in endpoint specific cache", logfields.EndpointID, ep.ID)
+	if h.logger.Enabled(context.TODO(), slog.LevelDebug) {
+		h.logger.Debug("Recording DNS lookup in endpoint specific cache", logfields.EndpointID, ep.ID)
+	}
 
 	// This must happen before the NameManager update below, to ensure that
 	// this data is included in the serialized Endpoint object.
@@ -343,10 +347,12 @@ func (h *dnsMessageHandler) UpdateOnDNSMsg(lookupTime time.Time, ep *endpoint.En
 	}
 	stat.UpdateEpCacheTime.End(true)
 
-	h.logger.Debug("Updating DNS name in cache from response to query",
-		logfields.DNSName, qname,
-		logfields.IPAddrs, responseIPs,
-	)
+	if h.logger.Enabled(context.TODO(), slog.LevelDebug) {
+		h.logger.Debug("Updating DNS name in cache from response to query",
+			logfields.DNSName, qname,
+			logfields.IPAddrs, responseIPs,
+		)
+	}
 
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), option.Config.FQDNProxyResponseMaxDelay)
 	defer updateCancel()
@@ -371,9 +377,11 @@ func (h *dnsMessageHandler) UpdateOnDNSMsg(lookupTime time.Time, ep *endpoint.En
 	// Policy updates for this name have been pushed out; we can release the lock.
 	h.nameManager.UnlockName(qname)
 
-	h.logger.Debug("Waited for endpoints to regenerate due to a DNS response",
-		logfields.Duration, time.Since(updateStart),
-		logfields.EndpointID, ep.GetID(),
-		logfields.DNSName, qname,
-	)
+	if h.logger.Enabled(context.TODO(), slog.LevelDebug) {
+		h.logger.Debug("Waited for endpoints to regenerate due to a DNS response",
+			logfields.Duration, time.Since(updateStart),
+			logfields.EndpointID, ep.GetID(),
+			logfields.DNSName, qname,
+		)
+	}
 }
