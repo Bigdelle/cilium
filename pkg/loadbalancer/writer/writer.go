@@ -748,32 +748,54 @@ func (w *Writer) SetBackendsOfCluster(txn WriteTxn, name loadbalancer.ServiceNam
 func (w *Writer) updateBackends(txn WriteTxn, serviceName loadbalancer.ServiceName, source source.Source, clusterID uint32, bes iter.Seq[loadbalancer.Backend]) (bool, error) {
 	changed := false
 	srcPrio := w.sourcePriority(source)
+
+	// pending is the staging Backend that each candidate is assembled in. Its
+	// address is taken (DeepEqual, Insert) so it lives on the heap, but it is
+	// reused for every backend that turns out to be unchanged. Insert hands
+	// ownership to statedb, so a fresh one is allocated only after an insert
+	// actually happened.
+	//
+	// That makes this loop allocate max(1, number of backends actually
+	// inserted) Backends. Upstream took the address of the range variable,
+	// which allocates one per backend unconditionally -- including the common
+	// re-reconciliation case where every backend is unchanged and nothing is
+	// inserted at all.
+	var pending *loadbalancer.Backend
+
 	for be := range bes {
-		be.Source = source
-		be.ClusterID = clusterID
-		be.SetSourcePriority(srcPrio)
-		be.ServiceName = serviceName
+		if pending == nil {
+			pending = new(loadbalancer.Backend)
+		}
+		*pending = be
+		pending.Source = source
+		pending.ClusterID = clusterID
+		pending.SetSourcePriority(srcPrio)
+		pending.ServiceName = serviceName
 
 		key := loadbalancer.BackendKey{
 			ServiceName:    serviceName,
-			Address:        be.Address,
+			Address:        pending.Address,
 			SourcePriority: srcPrio,
 		}
 
 		if old, _, ok := w.bes.Get(txn, loadbalancer.BackendByKey(key)); ok {
 			// Preserve health information.
-			be.Unhealthy = old.Unhealthy
-			be.UnhealthyUpdatedAt = old.UnhealthyUpdatedAt
-			if old.DeepEqual(&be) {
-				// None of the parameters have changed. Skip the update.
+			pending.Unhealthy = old.Unhealthy
+			pending.UnhealthyUpdatedAt = old.UnhealthyUpdatedAt
+			if old.DeepEqual(pending) {
+				// None of the parameters have changed. Skip the update and
+				// reuse the staging Backend for the next candidate.
 				continue
 			}
 		}
 
 		changed = true
-		if _, _, err := w.bes.Insert(txn, &be); err != nil {
+		if _, _, err := w.bes.Insert(txn, pending); err != nil {
 			return false, err
 		}
+		// statedb retains the inserted object, so it must not be written to
+		// again.
+		pending = nil
 	}
 	return changed, nil
 }

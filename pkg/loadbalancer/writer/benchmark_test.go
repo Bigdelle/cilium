@@ -285,3 +285,44 @@ func Benchmark_UpsertBackends_SharedBackendManyServices(b *testing.B) {
 		wtxn.Commit()
 	}
 }
+
+// Benchmark_UpsertBackends_Unchanged re-upserts a backend set that is already
+// stored and identical. This is the dominant pattern during control-plane
+// churn: a Service or EndpointSlice event causes every backend of the service
+// to be re-reconciled, and almost all of them are unchanged. Nothing is
+// inserted, so the whole loop should be close to allocation-free.
+func Benchmark_UpsertBackends_Unchanged(b *testing.B) {
+	p := fixture(b)
+
+	const numBackends = 100
+
+	name := loadbalancer.NewServiceName("test", "svc")
+
+	bes := make([]loadbalancer.Backend, numBackends)
+	for i := range numBackends {
+		bes[i] = loadbalancer.Backend{
+			Address: loadbalancer.NewL3n4Addr(loadbalancer.TCP, intToAddr(2000+i), 8080, loadbalancer.ScopeExternal),
+			State:   loadbalancer.BackendStateActive,
+		}
+	}
+
+	// Store them once, outside the measured loop.
+	wtxn := p.Writer.WriteTxn()
+	if err := p.Writer.UpsertBackends(wtxn, name, source.Kubernetes, LocalClusterID, slices.Values(bes)); err != nil {
+		wtxn.Abort()
+		b.Fatal(err)
+	}
+	wtxn.Commit()
+
+	for b.Loop() {
+		wtxn := p.Writer.WriteTxn()
+		if err := p.Writer.UpsertBackends(wtxn, name, source.Kubernetes, LocalClusterID, slices.Values(bes)); err != nil {
+			wtxn.Abort()
+			b.Fatal(err)
+		}
+		wtxn.Commit()
+	}
+
+	b.StopTimer()
+	b.ReportMetric(float64(b.N*numBackends)/b.Elapsed().Seconds(), "objects/sec")
+}
