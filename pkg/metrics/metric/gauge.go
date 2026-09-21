@@ -4,6 +4,8 @@
 package metric
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -89,6 +91,57 @@ func NewGaugeVecWithLabels(opts GaugeOpts, labels Labels) *gaugeVec {
 type gaugeVec struct {
 	*prometheus.GaugeVec
 	metric
+
+	// cache memoizes the Gauge wrapper for each underlying prometheus.Gauge, so
+	// that the hot WithLabelValues path does not allocate a wrapper per call.
+	//
+	// Every method that can remove a metric from the embedded GaugeVec must
+	// also evict from here, otherwise the entry -- and the dead
+	// prometheus.Gauge it is keyed by -- stays reachable forever. See Reset,
+	// Delete, DeleteLabelValues and DeletePartialMatch below.
+	cache sync.Map
+}
+
+func (gv *gaugeVec) wrapGauge(promGauge prometheus.Gauge) Gauge {
+	if v, ok := gv.cache.Load(promGauge); ok {
+		return v.(Gauge)
+	}
+	g := &gauge{
+		Gauge:  promGauge,
+		metric: gv.metric,
+	}
+	gv.cache.Store(promGauge, g)
+	return g
+}
+
+func (gv *gaugeVec) Reset() {
+	gv.cache.Clear()
+	gv.GaugeVec.Reset()
+}
+
+// Delete removes the metric for the given labels and drops the cached wrapper.
+//
+// The whole cache is cleared rather than the single entry: the wrapper is keyed
+// by the prometheus.Gauge, which is not recoverable from the labels once the
+// child has been deleted. Deletions are rare compared to WithLabelValues, and
+// the cache refills lazily.
+func (gv *gaugeVec) Delete(labels prometheus.Labels) bool {
+	gv.cache.Clear()
+	return gv.GaugeVec.Delete(labels)
+}
+
+// DeleteLabelValues removes the metric for the given label values and drops the
+// cached wrappers. See Delete for why the whole cache is cleared.
+func (gv *gaugeVec) DeleteLabelValues(lvs ...string) bool {
+	gv.cache.Clear()
+	return gv.GaugeVec.DeleteLabelValues(lvs...)
+}
+
+// DeletePartialMatch removes all metrics matching the given labels and drops the
+// cached wrappers. See Delete for why the whole cache is cleared.
+func (gv *gaugeVec) DeletePartialMatch(labels prometheus.Labels) int {
+	gv.cache.Clear()
+	return gv.GaugeVec.DeletePartialMatch(labels)
 }
 
 func (gv *gaugeVec) CurryWith(labels prometheus.Labels) (Vec[Gauge], error) {
@@ -103,10 +156,7 @@ func (gv *gaugeVec) CurryWith(labels prometheus.Labels) (Vec[Gauge], error) {
 func (gv *gaugeVec) GetMetricWith(labels prometheus.Labels) (Gauge, error) {
 	promGauge, err := gv.GaugeVec.GetMetricWith(labels)
 	if err == nil {
-		return &gauge{
-			Gauge:  promGauge,
-			metric: gv.metric,
-		}, nil
+		return gv.wrapGauge(promGauge), nil
 	}
 	return nil, err
 }
@@ -114,10 +164,7 @@ func (gv *gaugeVec) GetMetricWith(labels prometheus.Labels) (Gauge, error) {
 func (gv *gaugeVec) GetMetricWithLabelValues(lvs ...string) (Gauge, error) {
 	promGauge, err := gv.GaugeVec.GetMetricWithLabelValues(lvs...)
 	if err == nil {
-		return &gauge{
-			Gauge:  promGauge,
-			metric: gv.metric,
-		}, nil
+		return gv.wrapGauge(promGauge), nil
 	}
 	return nil, err
 }
@@ -126,20 +173,14 @@ func (gv *gaugeVec) With(labels prometheus.Labels) Gauge {
 	gv.checkLabels(labels)
 
 	promGauge := gv.GaugeVec.With(labels)
-	return &gauge{
-		Gauge:  promGauge,
-		metric: gv.metric,
-	}
+	return gv.wrapGauge(promGauge)
 }
 
 func (gv *gaugeVec) WithLabelValues(lvs ...string) Gauge {
 	gv.checkLabelValues(lvs...)
 
 	promGauge := gv.GaugeVec.WithLabelValues(lvs...)
-	return &gauge{
-		Gauge:  promGauge,
-		metric: gv.metric,
-	}
+	return gv.wrapGauge(promGauge)
 }
 
 func (gv *gaugeVec) SetEnabled(e bool) {
