@@ -26,6 +26,46 @@ type Resource interface {
 	proto.Message
 }
 
+// compactJSONInPlace removes insignificant whitespace from a JSON document,
+// writing the result back over src and returning the truncated slice. src is
+// modified. Whitespace inside string literals is preserved.
+//
+// This exists because protojson.Marshal deliberately does not produce stable
+// output: protobuf-go randomizes insignificant whitespace so that callers
+// cannot depend on the exact bytes.
+// See https://github.com/golang/protobuf/issues/1082
+//
+// Removing all insignificant whitespace is sufficient to make the output
+// deterministic, and unlike the json.Marshal(json.RawMessage(data)) round trip
+// it previously used, it needs neither a full re-parse nor a second buffer.
+func compactJSONInPlace(src []byte) []byte {
+	dst := src[:0]
+	inString := false
+	escaped := false
+	for _, b := range src {
+		if inString {
+			dst = append(dst, b)
+			switch {
+			case escaped:
+				escaped = false
+			case b == '\\':
+				escaped = true
+			case b == '"':
+				inString = false
+			}
+			continue
+		}
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '"':
+			inString = true
+		}
+		dst = append(dst, b)
+	}
+	return dst
+}
+
 func marshal(res Resource) (string, error) {
 	opts := protojson.MarshalOptions{UseProtoNames: true, Indent: ""}
 	data, err := opts.Marshal(res)
@@ -36,11 +76,7 @@ func marshal(res Resource) (string, error) {
 	// Since protojson.Marshal does not produce stable output,
 	// this is a workaround to produce stable json output.
 	// See https://github.com/golang/protobuf/issues/1082
-	data2, err := json.Marshal(json.RawMessage(data))
-	if err != nil {
-		return "", err
-	}
-	return string(data2), nil
+	return string(compactJSONInPlace(data)), nil
 }
 
 type serializedResource struct {
