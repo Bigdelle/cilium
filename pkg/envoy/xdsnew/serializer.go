@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	cilium "github.com/cilium/proxy/go/cilium/api"
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -84,6 +85,42 @@ type serializedResource struct {
 	Resource json.RawMessage `json:"resource"`
 }
 
+// writeJSONString writes s to sb as a JSON string literal.
+//
+// strconv.AppendQuote must not be used for this: it produces a Go string
+// literal, which for non-printable or non-ASCII input can contain \x, \a, \v
+// and \U escapes. None of those are valid JSON, and the result would fail to
+// parse back into []serializedResource in unmarshalEach.
+//
+// Resource names are almost always plain printable ASCII, which needs no
+// escaping at all, so that case is handled without allocating. Anything else
+// falls back to encoding/json.
+func writeJSONString(sb *strings.Builder, s string) error {
+	if isPlainJSONString(s) {
+		sb.WriteByte('"')
+		sb.WriteString(s)
+		sb.WriteByte('"')
+		return nil
+	}
+	quoted, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	sb.Write(quoted)
+	return nil
+}
+
+// isPlainJSONString reports whether s can be emitted between quotes verbatim.
+func isPlainJSONString(s string) bool {
+	for i := range len(s) {
+		switch c := s[i]; {
+		case c < 0x20, c > 0x7e, c == '"', c == '\\':
+			return false
+		}
+	}
+	return true
+}
+
 func resourceKeys[T any](resources map[string]T) []string {
 	keys := make([]string, 0, len(resources))
 	for k := range resources {
@@ -103,23 +140,34 @@ func Marshal(resources *xds.Resources) (map[string]string, error) {
 		}
 
 		slices.SortFunc(keys, cmp.Compare)
-		serializedResources := make([]serializedResource, 0, len(keys))
-		for _, k := range keys {
+		marshaledValues := make([]string, len(keys))
+		totalLen := 2 + len(keys)*24
+		for i, k := range keys {
 			marshaledResource, err := marshalByKey(k)
 			if err != nil {
 				return err
 			}
-			serializedResources = append(serializedResources, serializedResource{
-				Name:     k,
-				Resource: json.RawMessage(marshaledResource),
-			})
+			marshaledValues[i] = marshaledResource
+			totalLen += len(k) + len(marshaledResource)
 		}
 
-		data, err := json.Marshal(serializedResources)
-		if err != nil {
-			return err
+		var sb strings.Builder
+		sb.Grow(totalLen)
+		sb.WriteByte('[')
+		for i, k := range keys {
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString(`{"name":`)
+			if err := writeJSONString(&sb, k); err != nil {
+				return err
+			}
+			sb.WriteString(`,"resource":`)
+			sb.WriteString(marshaledValues[i])
+			sb.WriteByte('}')
 		}
-		encodedResources[typeURL] = string(data)
+		sb.WriteByte(']')
+		encodedResources[typeURL] = sb.String()
 		return nil
 	}
 
