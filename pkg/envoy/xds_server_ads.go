@@ -267,17 +267,6 @@ func (s *adsServer) getMetricsListenerConfig(port uint16) *envoy_config_listener
 // 'listenerConf()' is only called if a new listener is being created.
 // If isProxyListener is true, the listener is counted in proxyListeners.
 func (s *adsServer) addListener(ctx context.Context, name string, listenerConf func() *envoy_config_listener.Listener, wg *completion.WaitGroup, cb func(err error), isProxyListener bool) error {
-	listenerConfig := listenerConf()
-	if option.Config.EnableBPFTProxy {
-		// Envoy since 1.20.0 uses SO_REUSEPORT on listeners by default.
-		// BPF TPROXY is currently not compatible with SO_REUSEPORT, so disable it.
-		// Note that this may degrade Envoy performance.
-		listenerConfig.EnableReusePort = &wrapperspb.BoolValue{Value: false}
-	}
-	if err := listenerConfig.Validate(); err != nil {
-		return fmt.Errorf("Envoy: Could not validate Listener %s: %w", listenerConfig.String(), err)
-	}
-
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -297,15 +286,32 @@ func (s *adsServer) addListener(ctx context.Context, name string, listenerConf f
 	resources := s.cache.GetAllResources(localNodeID)
 
 	if resources == nil {
-		s.logger.Info(fmt.Sprintf("Failed to get existing resources for node %s, creating new one", localNodeID))
+		s.logger.Info("Failed to get existing resources for node, creating new one", "node", localNodeID)
 		resources = &xds.Resources{
-			Listeners: make(map[string]*envoy_config_listener.Listener),
+			Listeners: make(map[string]*envoy_config_listener.Listener, 1),
 		}
 	} else {
 		resources = resources.DeepCopy()
 	}
+
 	oldListener, existed := resources.Listeners[name]
-	resources.Listeners[name] = listenerConfig
+	var listenerConfig *envoy_config_listener.Listener
+	if !existed {
+		listenerConfig = listenerConf()
+		if option.Config.EnableBPFTProxy {
+			// Envoy since 1.20.0 uses SO_REUSEPORT on listeners by default.
+			// BPF TPROXY is currently not compatible with SO_REUSEPORT, so disable it.
+			// Note that this may degrade Envoy performance.
+			listenerConfig.EnableReusePort = &wrapperspb.BoolValue{Value: false}
+		}
+		if err := listenerConfig.Validate(); err != nil {
+			return fmt.Errorf("Envoy: Could not validate Listener %s: %w", listenerConfig.String(), err)
+		}
+		resources.Listeners[name] = listenerConfig
+	} else {
+		listenerConfig = oldListener
+	}
+
 	var callbackTypeURLs map[string]func(error)
 	if wg != nil {
 		callbackTypeURLs = map[string]func(error){ListenerTypeURL: cb}
