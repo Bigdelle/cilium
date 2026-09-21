@@ -5,6 +5,8 @@ package xdsnew
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	cilium "github.com/cilium/proxy/go/cilium/api"
@@ -21,6 +23,7 @@ import (
 	secret "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cilium/cilium/pkg/envoy/xds"
 )
@@ -164,5 +167,105 @@ func TestCompactJSONInPlace(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(got), &b))
 			require.Equal(t, a, b)
 		})
+	}
+}
+
+func TestWriteJSONString(t *testing.T) {
+	for _, s := range []string{
+		"",
+		"listener1",
+		"cilium-ingress/default/basic",
+		`quote"inside`,
+		`back\slash`,
+		"tab\there",
+		"bell\a",
+		"vertical\vtab",
+		"newline\nhere",
+		"nul\x00byte",
+		"unicode-ünïcödé",
+		"emoji-\U0001F600",
+		"<script>&</script>",
+	} {
+		t.Run(s, func(t *testing.T) {
+			var sb strings.Builder
+			require.NoError(t, writeJSONString(&sb, s))
+
+			// The output must be valid JSON that round-trips exactly.
+			// strconv.AppendQuote would emit \a, \v, \x00 and \U0001F600
+			// here, none of which encoding/json accepts.
+			var got string
+			require.NoError(t, json.Unmarshal([]byte(sb.String()), &got))
+			require.Equal(t, s, got)
+		})
+	}
+}
+
+func TestMarshalUnmarshalResourceNameNeedingEscapes(t *testing.T) {
+	// Resource names reach Marshal straight from the Envoy config, so they
+	// are not guaranteed to be plain ASCII. Whatever they contain, the
+	// encoding has to survive a Marshal/Unmarshal round trip.
+	name := "listener-\"quoted\"\t\a\v-ünïcödé-\U0001F600"
+	resources := xds.Resources{
+		Listeners: map[string]*envoy_config_listener.Listener{
+			name: {Name: name},
+		},
+	}
+
+	encoded, err := Marshal(&resources)
+	require.NoError(t, err)
+
+	decoded, err := Unmarshal(encoded)
+	require.NoError(t, err)
+	require.Len(t, decoded.Listeners, 1)
+	require.True(t, proto.Equal(resources.Listeners[name], decoded.Listeners[name]))
+}
+
+// benchResources builds a resource set roughly the shape and size of what a
+// busy agent pushes: a few hundred clusters and matching endpoints.
+func benchResources(n int) *xds.Resources {
+	res := xds.Resources{
+		Clusters:  make(map[string]*envoy_config_cluster.Cluster, n),
+		Endpoints: make(map[string]*envoy_config_endpoint.ClusterLoadAssignment, n),
+	}
+	for i := range n {
+		name := fmt.Sprintf("cilium-ingress/namespace-%03d/service-%03d:8080", i, i)
+		res.Clusters[name] = &envoy_config_cluster.Cluster{
+			Name:           name,
+			ConnectTimeout: &durationpb.Duration{Seconds: 5},
+		}
+		res.Endpoints[name] = &envoy_config_endpoint.ClusterLoadAssignment{
+			ClusterName: name,
+			Endpoints: []*envoy_config_endpoint.LocalityLbEndpoints{{
+				LbEndpoints: []*envoy_config_endpoint.LbEndpoint{{
+					HostIdentifier: &envoy_config_endpoint.LbEndpoint_Endpoint{
+						Endpoint: &envoy_config_endpoint.Endpoint{
+							Address: &envoy_config_core_v3.Address{
+								Address: &envoy_config_core_v3.Address_SocketAddress{
+									SocketAddress: &envoy_config_core_v3.SocketAddress{
+										Address:       fmt.Sprintf("10.0.%d.%d", i/256, i%256),
+										PortSpecifier: &envoy_config_core_v3.SocketAddress_PortValue{PortValue: 8080},
+									},
+								},
+							},
+						},
+					},
+				}},
+			}},
+		}
+	}
+	return &res
+}
+
+var sinkEncoded map[string]string
+
+func BenchmarkMarshal(b *testing.B) {
+	res := benchResources(256)
+	b.ReportAllocs()
+	for b.Loop() {
+		encoded, err := Marshal(res)
+		if err != nil {
+			b.Fatal(err)
+		}
+		sinkEncoded = encoded
 	}
 }
