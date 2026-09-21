@@ -46,5 +46,27 @@ func BenchmarkInjectLabels(b *testing.B) {
 	b.StopTimer()
 
 	// sanity checks
-	require.Len(b, ipc.ipToIdentityCache, b.N)
+	require.Len(b, ipc.ipToIdentityCache, len(prefixes))
+}
+
+func BenchmarkDoInjectLabels(b *testing.B) {
+	s := setupIPCacheTestSuite(b)
+	ipc := s.IPIdentityCache
+
+	addr := netip.MustParseAddr("1.0.0.0")
+	lbls := labels.NewLabelsFromSortedList(labels.LabelSourceCIDRGroup + ":foo=bar;fqdn:host-001.w1.memloop-dns.internal=")
+	prefixes := make([]cmtypes.PrefixCluster, 0, 64)
+	for range 64 {
+		pfx := cmtypes.NewLocalPrefixCluster(netip.PrefixFrom(addr, 32))
+		addr = addr.Next()
+		prefixes = append(prefixes, ipc.metadata.upsertLocked(pfx, source.Generated, "dns-policy", lbls)...)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := ipc.doInjectLabels(b.Context(), prefixes); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

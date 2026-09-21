@@ -272,15 +272,20 @@ func (m *metadata) get(prefix cmtypes.PrefixCluster) *resourceInfo {
 
 // getLocked returns a deep copy of the flattened prefix info
 func (m *metadata) getLocked(prefix cmtypes.PrefixCluster) *resourceInfo {
+	if info := m.getReadOnlyLocked(prefix); info != nil {
+		return info.DeepCopy()
+	}
+	return nil
+}
+
+// getReadOnlyLocked returns the flattened prefix info without cloning its labels map.
+// Callers must hold m.RLock() or m.Lock() and must not mutate the returned resourceInfo.
+func (m *metadata) getReadOnlyLocked(prefix cmtypes.PrefixCluster) *resourceInfo {
 	if pi, ok := m.m[canonicalPrefix(prefix)]; ok {
 		if pi.flattened == nil {
-			// re-compute the flattened set of prefixes
-			pi.flattened = pi.flatten(m.logger.With(
-				logfields.CIDR, prefix,
-				logfields.ClusterID, prefix.ClusterID(),
-			))
+			pi.flattened = pi.flatten(m.logger)
 		}
-		return pi.flattened.DeepCopy()
+		return pi.flattened
 	}
 	return nil
 }
@@ -313,10 +318,12 @@ func (m *metadata) mergeLabels(lbls labels.Labels, prefixCluster cmtypes.PrefixC
 	// Iterate over all shorter prefixes, from `prefix` to 0.0.0.0/0 // ::/0.
 	// Merge all labels, preferring those from longer prefixes, but only merge a single "cidr:XXX" label at most.
 	prefix := prefixCluster.AsPrefix()
+	unmappedAddr := prefix.Addr().Unmap()
+	clusterID := prefixCluster.ClusterID()
 	for bits := prefix.Bits(); bits >= 0; bits-- {
-		parent, _ := prefix.Addr().Unmap().Prefix(bits) // canonical
-		if info := m.getLocked(cmtypes.NewPrefixCluster(parent, prefixCluster.ClusterID())); info != nil {
-			for k, v := range info.ToLabels() {
+		parent, _ := unmappedAddr.Prefix(bits) // canonical
+		if info := m.getReadOnlyLocked(cmtypes.NewPrefixCluster(parent, clusterID)); info != nil {
+			for k, v := range info.labels {
 				if v.Source == labels.LabelSourceCIDR && hasCIDR {
 					continue
 				}
@@ -379,18 +386,19 @@ func (ipc *IPCache) doInjectLabels(ctx context.Context, modifiedPrefixes []cmtyp
 		encryptKey    uint8
 		endpointFlags uint8
 
-		force bool
+		force     bool
+		prefixStr string
 	}
 
 	var (
 		// previouslyAllocatedIdentities maps IP Prefix -> Identity for
 		// old identities where the prefix will now map to a new identity
-		previouslyAllocatedIdentities = make(map[cmtypes.PrefixCluster]Identity)
+		previouslyAllocatedIdentities = make(map[cmtypes.PrefixCluster]Identity, len(modifiedPrefixes))
 		// idsToAdd stores the identities that must be updated via the
 		// selector cache.
 		idsToAdd = make(map[identity.NumericIdentity]labels.Labels)
 		// entriesToReplace stores the identity to replace in the ipcache.
-		entriesToReplace = make(map[cmtypes.PrefixCluster]ipcacheEntry)
+		entriesToReplace = make(map[cmtypes.PrefixCluster]ipcacheEntry, len(modifiedPrefixes))
 		entriesToDelete  = make(map[cmtypes.PrefixCluster]Identity)
 		// unmanagedPrefixes is the set of prefixes for which we no longer have
 		// any metadata, but were created by a call directly to Upsert()
@@ -494,7 +502,8 @@ func (ipc *IPCache) doInjectLabels(ctx context.Context, modifiedPrefixes []cmtyp
 				// have now been removed, then we need to explicitly
 				// work around that to remove the old higher-priority
 				// identity and replace it with this new identity.
-				force: entryExists && prefixInfo.Source() != oldID.Source && oldID.ID != newID.ID,
+				force:     entryExists && prefixInfo.Source() != oldID.Source && oldID.ID != newID.ID,
+				prefixStr: pstr,
 			}
 		}
 	releaseIdentity:
@@ -551,6 +560,7 @@ func (ipc *IPCache) doInjectLabels(ctx context.Context, modifiedPrefixes []cmtyp
 						encryptKey:    oldEncryptionKey,
 						endpointFlags: oldEndpointFlags,
 						force:         true, /* overwrittenLegacySource is lower precedence */
+						prefixStr:     pstr,
 					}
 					entriesToReplace[prefix] = unmanagedEntry
 
@@ -608,7 +618,10 @@ func (ipc *IPCache) doInjectLabels(ctx context.Context, modifiedPrefixes []cmtyp
 	ipc.mutex.Lock()
 	defer ipc.mutex.Unlock()
 	for p, entry := range entriesToReplace {
-		prefix := p.String()
+		prefix := entry.prefixStr
+		if prefix == "" {
+			prefix = p.String()
+		}
 		meta := ipc.getK8sMetadata(prefix)
 		if _, err2 := ipc.upsertLocked(
 			prefix,

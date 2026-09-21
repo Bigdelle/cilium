@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -276,7 +277,8 @@ func (ipc *IPCache) GetMetadataLabels(ip netip.Addr) labels.Labels {
 // getK8sMetadata returns Kubernetes metadata for the given IP address.
 func (ipc *IPCache) getK8sMetadata(ip string) *K8sMetadata {
 	if k8sMeta, ok := ipc.ipToK8sMetadata[ip]; ok {
-		return &k8sMeta
+		metaCopy := k8sMeta
+		return &metaCopy
 	}
 	return nil
 }
@@ -431,7 +433,13 @@ func (ipc *IPCache) upsertLocked(
 	// don't notify the listeners.
 	if cidrCluster, err = cmtypes.ParsePrefixCluster(ip); err == nil {
 		if cidrCluster.IsSingleIP() {
-			if _, endpointIPFound := ipc.ipToIdentityCache[cidrCluster.AddrCluster().String()]; endpointIPFound {
+			addrStr := ip
+			if slash := strings.IndexByte(ip, '/'); slash >= 0 && cidrCluster.ClusterID() == 0 {
+				addrStr = ip[:slash]
+			} else {
+				addrStr = cidrCluster.AddrCluster().String()
+			}
+			if _, endpointIPFound := ipc.ipToIdentityCache[addrStr]; endpointIPFound {
 				scopedLog.Debug("Ignoring CIDR to identity mapping as it is shadowed by an endpoint IP")
 				// Skip calling back the listeners, since the endpoint IP has
 				// precedence over the new CIDR.
