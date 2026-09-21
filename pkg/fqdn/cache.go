@@ -737,37 +737,47 @@ func (c *DNSCache) Dump() (lookups []*cacheEntry) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// Collect all the still-valid entries
+	// Collect all the still-valid entries. Each forward[name] map stores IPs for
+	// a single hostname; when all IPs originate from the same lookup they share
+	// the same *cacheEntry pointer, so we can skip duplicates inline and only
+	// fall back to pointer sorting when a hostname has multiple distinct entries.
 	lookups = make([]*cacheEntry, 0, len(c.forward))
+	needSortDedup := false
 	for _, entries := range c.forward {
+		var first *cacheEntry
 		for _, entry := range entries {
-			lookups = append(lookups, entry)
+			if first == nil {
+				first = entry
+				lookups = append(lookups, entry)
+			} else if entry != first {
+				needSortDedup = true
+				lookups = append(lookups, entry)
+			}
 		}
 	}
 
-	// Dedup the entries. They are created once and are immutable so the address
-	// is a unique identifier.
-	// We iterate through the list, keeping unique pointers. This is correct
-	// because the list is sorted and, if two consecutive entries are the same,
-	// it is safe to overwrite the second duplicate.
-	sort.Slice(lookups, func(i, j int) bool {
-		return uintptr(unsafe.Pointer(lookups[i])) < uintptr(unsafe.Pointer(lookups[j]))
+	if !needSortDedup {
+		return lookups
+	}
+
+	slices.SortFunc(lookups, func(a, b *cacheEntry) int {
+		pa := uintptr(unsafe.Pointer(a))
+		pb := uintptr(unsafe.Pointer(b))
+		if pa < pb {
+			return -1
+		}
+		if pa > pb {
+			return 1
+		}
+		return 0
 	})
-
-	deduped := lookups[:0] // len==0 but cap==cap(lookups)
-	for readIdx, lookup := range lookups {
-		if readIdx == 0 || deduped[len(deduped)-1] != lookups[readIdx] {
-			deduped = append(deduped, lookup)
-		}
-	}
-
-	return deduped
+	return slices.Compact(lookups)
 }
 
 func (c *DNSCache) DumpNames() sets.Set[string] {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	names := make(sets.Set[string])
+	names := make(sets.Set[string], len(c.forward))
 	for name := range c.forward {
 		names.Insert(name)
 	}
