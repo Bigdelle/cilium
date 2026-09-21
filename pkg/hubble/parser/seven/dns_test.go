@@ -89,3 +89,45 @@ func TestDecodeL7DNSRecord(t *testing.T) {
 		Rrtypes:           []string{"A"},
 	}, f.GetL7().GetDns())
 }
+
+func BenchmarkDecodeDNS(b *testing.B) {
+	lr := &accesslog.LogRecord{
+		Type:                accesslog.TypeResponse,
+		Timestamp:           fakeTimestamp,
+		NodeAddressInfo:     fakeNodeInfo,
+		ObservationPoint:    accesslog.Ingress,
+		SourceEndpoint:      fakeDestinationEndpoint,
+		DestinationEndpoint: fakeSourceEndpoint,
+		IPVersion:           accesslog.VersionIPv4,
+		Verdict:             accesslog.VerdictForwarded,
+		TransportProtocol:   accesslog.TransportProtocol(u8proto.UDP),
+		DNS: &accesslog.LogRecordDNS{
+			Query: "host-001.w1.memloop-dns.internal.",
+			IPs: []netip.Addr{
+				netip.MustParseAddr("198.18.1.1"),
+				netip.MustParseAddr("198.18.1.2"),
+				netip.MustParseAddr("198.18.1.3"),
+				netip.MustParseAddr("198.18.1.4"),
+			},
+			TTL:               5,
+			ObservationSource: accesslog.DNSSourceProxy,
+			RCode:             0,
+			QTypes:            []uint16{1},
+			AnswerTypes:       []uint16{1, 1, 1, 1},
+		},
+	}
+	lr.SourceEndpoint.Port = 53
+	lr.DestinationEndpoint.Port = 56789
+
+	parser, err := New(hivetest.Logger(b), &testutils.NoopDNSGetter, &testutils.NoopIPGetter, &testutils.NoopServiceGetter, &testutils.NoopEndpointGetter)
+	require.NoError(b, err)
+
+	f := &flowpb.Flow{}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := parser.Decode(lr, f); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -4,7 +4,7 @@
 package seven
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/gopacket/gopacket/layers"
@@ -14,9 +14,12 @@ import (
 )
 
 func decodeDNS(flowType accesslog.FlowType, dns *accesslog.LogRecordDNS) *flowpb.Layer7_Dns {
-	qtypes := make([]string, 0, len(dns.QTypes))
-	for _, qtype := range dns.QTypes {
-		qtypes = append(qtypes, layers.DNSType(qtype).String())
+	var qtypes []string
+	if len(dns.QTypes) > 0 {
+		qtypes = make([]string, len(dns.QTypes))
+		for i, qtype := range dns.QTypes {
+			qtypes[i] = layers.DNSType(qtype).String()
+		}
 	}
 	if flowType == accesslog.TypeRequest {
 		// Set only fields that are relevant for requests.
@@ -28,13 +31,31 @@ func decodeDNS(flowType accesslog.FlowType, dns *accesslog.LogRecordDNS) *flowpb
 			},
 		}
 	}
-	ips := make([]string, 0, len(dns.IPs))
-	for _, ip := range dns.IPs {
-		ips = append(ips, ip.String())
+	var ips []string
+	if len(dns.IPs) == 1 {
+		ips = []string{dns.IPs[0].String()}
+	} else if len(dns.IPs) > 1 {
+		ips = make([]string, len(dns.IPs))
+		var sb strings.Builder
+		sb.Grow(len(dns.IPs) * 16)
+		var buf [40]byte
+		offsets := make([]int, len(dns.IPs)+1)
+		for i, ip := range dns.IPs {
+			b := ip.AppendTo(buf[:0])
+			sb.Write(b)
+			offsets[i+1] = sb.Len()
+		}
+		all := sb.String()
+		for i := range dns.IPs {
+			ips[i] = all[offsets[i]:offsets[i+1]]
+		}
 	}
-	rtypes := make([]string, 0, len(dns.AnswerTypes))
-	for _, rtype := range dns.AnswerTypes {
-		rtypes = append(rtypes, layers.DNSType(rtype).String())
+	var rtypes []string
+	if len(dns.AnswerTypes) > 0 {
+		rtypes = make([]string, len(dns.AnswerTypes))
+		for i, rtype := range dns.AnswerTypes {
+			rtypes[i] = layers.DNSType(rtype).String()
+		}
 	}
 	return &flowpb.Layer7_Dns{
 		Dns: &flowpb.DNS{
@@ -51,46 +72,72 @@ func decodeDNS(flowType accesslog.FlowType, dns *accesslog.LogRecordDNS) *flowpb
 }
 
 func dnsSummary(flowType accesslog.FlowType, dns *accesslog.LogRecordDNS) string {
-	types := []string{}
-	for _, t := range dns.QTypes {
-		types = append(types, layers.DNSType(t).String())
-	}
-	qTypeStr := strings.Join(types, ",")
-
 	switch flowType {
 	case accesslog.TypeRequest:
-		return fmt.Sprintf("DNS Query %s %s", dns.Query, qTypeStr)
+		var sb strings.Builder
+		sb.Grow(12 + len(dns.Query) + len(dns.QTypes)*5)
+		sb.WriteString("DNS Query ")
+		sb.WriteString(dns.Query)
+		sb.WriteByte(' ')
+		for i, t := range dns.QTypes {
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString(layers.DNSType(t).String())
+		}
+		return sb.String()
 	case accesslog.TypeResponse:
+		var sb strings.Builder
+		sb.Grow(40 + len(dns.Query) + len(dns.IPs)*16 + len(dns.CNAMEs)*24)
+		sb.WriteString("DNS Answer ")
 		rcode := layers.DNSResponseCode(dns.RCode)
-
-		var answer string
 		if rcode != layers.DNSResponseCodeNoErr {
-			answer = fmt.Sprintf("RCode: %s", rcode)
+			sb.WriteString("RCode: ")
+			sb.WriteString(rcode.String())
 		} else {
-			parts := make([]string, 0)
-
+			wrote := false
 			if len(dns.IPs) > 0 {
-				ips := make([]string, 0, len(dns.IPs))
-				for _, ip := range dns.IPs {
-					ips = append(ips, ip.String())
+				var ipBuf strings.Builder
+				ipBuf.Grow(len(dns.IPs) * 16)
+				var b40 [40]byte
+				for i, ip := range dns.IPs {
+					if i > 0 {
+						ipBuf.WriteByte(',')
+					}
+					ipBuf.Write(ip.AppendTo(b40[:0]))
 				}
-				parts = append(parts, fmt.Sprintf("%q", strings.Join(ips, ",")))
+				var qBuf [64]byte
+				sb.Write(strconv.AppendQuote(qBuf[:0], ipBuf.String()))
+				wrote = true
 			}
-
 			if len(dns.CNAMEs) > 0 {
-				parts = append(parts, fmt.Sprintf("CNAMEs: %q", strings.Join(dns.CNAMEs, ",")))
+				if wrote {
+					sb.WriteByte(' ')
+				}
+				sb.WriteString("CNAMEs: ")
+				var qBuf [64]byte
+				sb.Write(strconv.AppendQuote(qBuf[:0], strings.Join(dns.CNAMEs, ",")))
 			}
-
-			answer = strings.Join(parts, " ")
 		}
-
-		sourceType := "Query"
-		switch dns.ObservationSource {
-		case accesslog.DNSSourceProxy:
-			sourceType = "Proxy"
+		sb.WriteString(" TTL: ")
+		var ttlBuf [16]byte
+		sb.Write(strconv.AppendUint(ttlBuf[:0], uint64(dns.TTL), 10))
+		sb.WriteString(" (")
+		if dns.ObservationSource == accesslog.DNSSourceProxy {
+			sb.WriteString("Proxy ")
+		} else {
+			sb.WriteString("Query ")
 		}
-
-		return fmt.Sprintf("DNS Answer %s TTL: %d (%s %s %s)", answer, dns.TTL, sourceType, dns.Query, qTypeStr)
+		sb.WriteString(dns.Query)
+		sb.WriteByte(' ')
+		for i, t := range dns.QTypes {
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString(layers.DNSType(t).String())
+		}
+		sb.WriteByte(')')
+		return sb.String()
 	}
 
 	return ""
