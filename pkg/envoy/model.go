@@ -323,20 +323,28 @@ func GetNetworkPolicy(ep endpoint.EndpointUpdater, getEgressNamedPorts GetEgress
 }
 
 func GetPortNetworkPolicyRule(ep endpoint.EndpointUpdater, selectors policy.SelectorSnapshot, sel policy.CachedSelector, psp *policy.PerSelectorPolicy, tierBasePriority, tierLastPriority policyTypes.Priority, useFullTLSContext, useSDS bool, policySecretsNamespace string, l7RulesTranslator envoypolicy.EnvoyL7RulesTranslator, logger *slog.Logger) (*cilium.PortNetworkPolicyRule, bool) {
-	r := InitPortNetworkPolicyRule(psp, tierBasePriority, tierLastPriority, logger)
-
 	// Optimize the policy if the endpoint selector is a wildcard by
 	// keeping remote policies list empty to match all remote policies.
+	var remotePolicies []uint32
 	if !sel.IsWildcard() {
 		selections := sel.GetSelectionsAt(selectors)
 
 		// No remote policies would match this rule. Discard it.
 		if len(selections) == 0 {
+			// Report an out-of-tier priority even though the rule is
+			// being thrown away: it means the policy itself is
+			// malformed, which is worth surfacing regardless of
+			// whether this particular selector resolved to anything.
+			checkTierPriority(psp, tierBasePriority, tierLastPriority, logger)
 			return nil, true
 		}
 
-		r.RemotePolicies = selections.AsUint32Slice()
+		remotePolicies = selections.AsUint32Slice()
 	}
+
+	// Allocated only once the rule is known to survive the check above.
+	r := InitPortNetworkPolicyRule(psp, tierBasePriority, tierLastPriority, logger)
+	r.RemotePolicies = remotePolicies
 
 	if psp == nil {
 		// L3/L4 only rule, everything in L7 is allowed && no TLS
@@ -901,9 +909,10 @@ func GetWildcardPortNetworkPolicyRules(ep endpoint.EndpointUpdater,
 
 var errOutOfTierPriority = errors.New("Rule priority is invalid for the tier")
 
-// InitPortNetworkPolicyRule returns a new PortNetworkPolicyRule with Precedence and Verdict fields
-// initialized. RemotePolicies field is left empty, which is only good for a wildcard identity rule.
-func InitPortNetworkPolicyRule(psp *policy.PerSelectorPolicy, tierBasePriority, tierLastPriority policyTypes.Priority, logger *slog.Logger) *cilium.PortNetworkPolicyRule {
+// checkTierPriority logs an error if psp's priority falls outside the tier it
+// is being rendered into. It has no effect on the rendered policy; it only
+// reports a malformed input.
+func checkTierPriority(psp *policy.PerSelectorPolicy, tierBasePriority, tierLastPriority policyTypes.Priority, logger *slog.Logger) {
 	priority := psp.GetPriority()
 	if priority < tierBasePriority || priority > tierLastPriority {
 		logger.Error(errOutOfTierPriority.Error(),
@@ -912,6 +921,13 @@ func InitPortNetworkPolicyRule(psp *policy.PerSelectorPolicy, tierBasePriority, 
 			logfields.TierLastPriority, tierLastPriority,
 			logfields.Stacktrace, hclog.Stacktrace())
 	}
+}
+
+// InitPortNetworkPolicyRule returns a new PortNetworkPolicyRule with Precedence and Verdict fields
+// initialized. RemotePolicies field is left empty, which is only good for a wildcard identity rule.
+func InitPortNetworkPolicyRule(psp *policy.PerSelectorPolicy, tierBasePriority, tierLastPriority policyTypes.Priority, logger *slog.Logger) *cilium.PortNetworkPolicyRule {
+	checkTierPriority(psp, tierBasePriority, tierLastPriority, logger)
+
 	verdict := psp.GetVerdict()
 
 	precedence := psp.GetPrecedence()
