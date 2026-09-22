@@ -7,6 +7,7 @@ package parser
 
 import (
 	"log/slog"
+	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -95,17 +96,62 @@ func lostEventSourceToProto(source int) pb.LostEventSource {
 	}
 }
 
+// decodedEvent groups the messages that every decoded event needs into one
+// allocation. They are created together, have identical lifetime, and are
+// reachable only through the Event at the root.
+type decodedEvent struct {
+	ev v1.Event
+	ts timestamppb.Timestamp
+}
+
+func newDecodedEvent(t time.Time) *decodedEvent {
+	d := new(decodedEvent)
+	d.ts = timestamppb.Timestamp{
+		Seconds: t.Unix(),
+		Nanos:   int32(t.Nanosecond()),
+	}
+	d.ev.Timestamp = &d.ts
+	return d
+}
+
+// decodedFlowEvent is decodedEvent plus the Flow and its Emitter, for the
+// payloads that produce a flow.
+//
+// The Emitter is co-allocated rather than shared from a package-level
+// singleton. It is the same number of allocations either way, since it sits
+// inside this struct, and it keeps every flow owning its own messages.
+type decodedFlowEvent struct {
+	ev      v1.Event
+	ts      timestamppb.Timestamp
+	flow    pb.Flow
+	emitter pb.Emitter
+}
+
+func newDecodedFlowEvent(t time.Time, uuid, nodeName string) *decodedFlowEvent {
+	d := new(decodedFlowEvent)
+	d.ts = timestamppb.Timestamp{
+		Seconds: t.Unix(),
+		Nanos:   int32(t.Nanosecond()),
+	}
+	d.ev.Timestamp = &d.ts
+	d.emitter = pb.Emitter{
+		Name:    v1.FlowEmitter,
+		Version: v1.FlowEmitterVersion,
+	}
+	d.flow.Emitter = &d.emitter
+	d.flow.Uuid = uuid
+	// FIXME: Time and NodeName are now part of GetFlowsResponse. We populate
+	// these fields for compatibility with old clients.
+	d.flow.Time = &d.ts
+	d.flow.NodeName = nodeName
+	return d
+}
+
 // Decode decodes a cilium monitor 'payload' and returns a v1.Event with
 // the Event field populated.
 func (p *Parser) Decode(monitorEvent *observerTypes.MonitorEvent) (*v1.Event, error) {
 	if monitorEvent == nil {
 		return nil, errors.ErrEmptyData
-	}
-
-	// TODO: Pool decoded flows instead of allocating new objects each time.
-	ts := timestamppb.New(monitorEvent.Timestamp)
-	ev := &v1.Event{
-		Timestamp: ts,
 	}
 
 	switch payload := monitorEvent.Payload.(type) {
@@ -114,69 +160,57 @@ func (p *Parser) Decode(monitorEvent *observerTypes.MonitorEvent) (*v1.Event, er
 			return nil, errors.ErrEmptyData
 		}
 
-		flow := &pb.Flow{
-			Emitter: &pb.Emitter{
-				Name:    v1.FlowEmitter,
-				Version: v1.FlowEmitterVersion,
-			},
-			Uuid: monitorEvent.UUID.String(),
-		}
-		switch payload.Data[0] {
-		case monitorAPI.MessageTypeDebug:
+		if payload.Data[0] == monitorAPI.MessageTypeDebug {
 			// Debug and TraceSock are both perf ring buffer events without any
 			// associated captured network packet header, so we treat them
-			// separately
+			// separately.
+			//
+			// Debug events carry no flow, so they use the smaller struct; the
+			// flow-carrying one would keep a whole unused pb.Flow alive for as
+			// long as the event is retained.
 			dbg, err := p.dbg.Decode(payload.Data, payload.CPU)
 			if err != nil {
 				return nil, err
 			}
-			ev.Event = dbg
-			return ev, nil
+			d := newDecodedEvent(monitorEvent.Timestamp)
+			d.ev.Event = dbg
+			return &d.ev, nil
+		}
+
+		d := newDecodedFlowEvent(monitorEvent.Timestamp, monitorEvent.UUID.String(), monitorEvent.NodeName)
+		switch payload.Data[0] {
 		case monitorAPI.MessageTypeTraceSock:
-			if err := p.sock.Decode(payload.Data, flow); err != nil {
+			if err := p.sock.Decode(payload.Data, &d.flow); err != nil {
 				return nil, err
 			}
 		default:
-			if err := p.l34.Decode(payload.Data, flow); err != nil {
+			if err := p.l34.Decode(payload.Data, &d.flow); err != nil {
 				return nil, err
 			}
 		}
-		// FIXME: Time and NodeName are now part of GetFlowsResponse. We
-		// populate these fields for compatibility with old clients.
-		flow.Time = ts
-		flow.NodeName = monitorEvent.NodeName
-		ev.Event = flow
-		return ev, nil
+		d.ev.Event = &d.flow
+		return &d.ev, nil
 	case *observerTypes.AgentEvent:
 		switch payload.Type {
 		case monitorAPI.MessageTypeAccessLog:
-			flow := &pb.Flow{
-				Emitter: &pb.Emitter{
-					Name:    v1.FlowEmitter,
-					Version: v1.FlowEmitterVersion,
-				},
-				Uuid: monitorEvent.UUID.String(),
-			}
 			logrecord, ok := payload.Message.(accesslog.LogRecord)
 			if !ok {
 				return nil, errors.ErrInvalidAgentMessageType
 			}
-			if err := p.l7.Decode(&logrecord, flow); err != nil {
+			d := newDecodedFlowEvent(monitorEvent.Timestamp, monitorEvent.UUID.String(), monitorEvent.NodeName)
+			if err := p.l7.Decode(&logrecord, &d.flow); err != nil {
 				return nil, err
 			}
-			// FIXME: Time and NodeName are now part of GetFlowsResponse. We
-			// populate these fields for compatibility with old clients.
-			flow.Time = ts
-			flow.NodeName = monitorEvent.NodeName
-			ev.Event = flow
-			return ev, nil
+			d.ev.Event = &d.flow
+			return &d.ev, nil
 		case monitorAPI.MessageTypeAgent:
 			agentNotifyMessage, ok := payload.Message.(monitorAPI.AgentNotifyMessage)
 			if !ok {
 				return nil, errors.ErrInvalidAgentMessageType
 			}
-			ev.Event = agent.NotifyMessageToProto(agentNotifyMessage)
-			return ev, nil
+			d := newDecodedEvent(monitorEvent.Timestamp)
+			d.ev.Event = agent.NotifyMessageToProto(agentNotifyMessage)
+			return &d.ev, nil
 		default:
 			return nil, errors.ErrUnknownEventType
 		}
@@ -194,10 +228,12 @@ func (p *Parser) Decode(monitorEvent *observerTypes.MonitorEvent) (*v1.Event, er
 		if !payload.Last.IsZero() {
 			lostEvent.Last = timestamppb.New(payload.Last)
 		}
-		ev.Event = lostEvent
-		return ev, nil
+		d := newDecodedEvent(monitorEvent.Timestamp)
+		d.ev.Event = lostEvent
+		return &d.ev, nil
 	case nil:
-		return ev, errors.ErrEmptyData
+		d := newDecodedEvent(monitorEvent.Timestamp)
+		return &d.ev, errors.ErrEmptyData
 	default:
 		return nil, errors.ErrUnknownEventType
 	}

@@ -1179,6 +1179,27 @@ var l3n4AddrCache = cache.New(
 	},
 )
 
+// l3n4AddrKeySize is the length of the byte key used by the frontend address
+// index. This must be kept in sync with Bytes().
+const l3n4AddrKeySize = cmtypes.AddrClusterLen +
+	2 + /* Port */
+	1 + /* Protocol */
+	1 /* Scope */
+
+// l3n4AddrKeyInto writes the frontend address index key for the given tuple
+// into key. It produces byte-for-byte the same key that Bytes() would produce
+// for the equivalent [L3n4Addr], without having to construct one.
+//
+// The key is written into a caller-provided array so that callers on a hot
+// lookup path can keep it on the stack.
+func l3n4AddrKeyInto(key *[l3n4AddrKeySize]byte, addrCluster cmtypes.AddrCluster, proto L4Type, port uint16, scope uint8) {
+	addr20 := addrCluster.As20()
+	copy(key[:cmtypes.AddrClusterLen], addr20[:])
+	binary.BigEndian.PutUint16(key[cmtypes.AddrClusterLen:cmtypes.AddrClusterLen+2], port)
+	key[cmtypes.AddrClusterLen+2] = L4TypeAsByte(proto)
+	key[cmtypes.AddrClusterLen+3] = scope
+}
+
 func (l L3n4Addr) l3n4AddrCacheHash() uint64 {
 	var d xxhash.Digest
 	buf := l.Addr().As16()
@@ -1198,18 +1219,9 @@ func (l L3n4Addr) Bytes() []byte {
 			return e.addr == l
 		},
 		func() l3n4AddrCacheEntry {
-			const keySize = cmtypes.AddrClusterLen +
-				2 /* Port */ +
-				1 /* Protocol */ +
-				1 /* Scope */
-
 			rep := l.rep()
-			key := make([]byte, 0, keySize)
-			addr20 := rep.addrCluster.As20()
-			key = append(key, addr20[:]...)
-			key = binary.BigEndian.AppendUint16(key, rep.Port)
-			key = append(key, L4TypeAsByte(rep.Protocol))
-			key = append(key, rep.scope)
+			key := make([]byte, l3n4AddrKeySize)
+			l3n4AddrKeyInto((*[l3n4AddrKeySize]byte)(key), rep.addrCluster, rep.Protocol, rep.Port, rep.scope)
 			return l3n4AddrCacheEntry{
 				addr:  l,
 				bytes: key,

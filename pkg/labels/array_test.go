@@ -292,6 +292,15 @@ func BenchmarkLabelArray_String(b *testing.B) {
 	}
 }
 
+func BenchmarkLabelArray_Labels(b *testing.B) {
+	l := NewLabelArrayFromSortedList("a;b;c;d;e;f;g;h;i;j;k;l;m;n;o;p;q;r;s;t;u;v;w;x;y;z")
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = l.Labels()
+	}
+}
+
 // LabelArray.Has() is a specific interface
 // that is required for kubernetes selectors to work
 func TestLabelArray_Has(t *testing.T) {
