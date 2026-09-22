@@ -110,18 +110,50 @@ func (ls LabelArrayList) String() string {
 	return string(ls.ArrayListString())
 }
 
+// labelArraySeparator separates consecutive LabelArrays in a
+// LabelArrayListString. It is the "], [" that ArrayListString writes between
+// two bracketed arrays.
+const labelArraySeparator = "], ["
+
 func LabelArrayListFromString(str LabelArrayListString) (ls LabelArrayList) {
 	// each LabelArray starts with '[' and ends with ']'
-	if len(str) > 2 && str[0] == '[' && str[len(str)-1] == ']' {
-		str = str[1 : len(str)-1] // remove first and last bracket
-		arrays := strings.Split(string(str), "], [")
-		for i := range arrays {
-			labels := strings.Split(arrays[i], " ")
-			var la LabelArray
-			for j := range labels {
-				la = append(la, ParseLabel(labels[j]))
+	if len(str) <= 2 || str[0] != '[' || str[len(str)-1] != ']' {
+		return nil
+	}
+	body := string(str[1 : len(str)-1]) // remove first and last bracket
+
+	// Walk the separators directly instead of calling strings.Split twice.
+	// Split allocates a []string per level that is discarded immediately
+	// afterwards, and appending to a nil LabelArray/LabelArrayList re-grows
+	// and copies the backing array a logarithmic number of times even though
+	// the final length is already known: it is exactly one more than the
+	// number of separators.
+	ls = make(LabelArrayList, 0, strings.Count(body, labelArraySeparator)+1)
+	for {
+		arrayStr := body
+		sep := strings.Index(body, labelArraySeparator)
+		if sep >= 0 {
+			arrayStr, body = body[:sep], body[sep+len(labelArraySeparator):]
+		}
+
+		la := make(LabelArray, 0, strings.Count(arrayStr, " ")+1)
+		for {
+			lblStr := arrayStr
+			sp := strings.IndexByte(arrayStr, ' ')
+			if sp >= 0 {
+				lblStr, arrayStr = arrayStr[:sp], arrayStr[sp+1:]
 			}
-			ls = append(ls, la)
+			// An empty segment still yields a label, exactly as
+			// strings.Split would have produced one.
+			la = append(la, ParseLabel(lblStr))
+			if sp < 0 {
+				break
+			}
+		}
+		ls = append(ls, la)
+
+		if sep < 0 {
+			break
 		}
 	}
 	return ls
