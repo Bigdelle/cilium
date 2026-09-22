@@ -238,8 +238,21 @@ func (h *dnsMessageHandler) logDNSMessage(
 	dnsMsgDetails *dnsproxy.MsgDetails,
 	stat *dnsproxy.ProxyRequestContext,
 ) error {
-	protoID := u8proto.ProtoIDs[strings.ToLower(flowInfo.protocol)]
-	ep.UpdateProxyStatistics("fqdn", strings.ToUpper(flowInfo.protocol), flowInfo.serverAddrPort.Port(), h.bindPort, false, !dnsMsgDetails.Response, flowInfo.verdict)
+	protoID, ok := u8proto.ProtoIDs[flowInfo.protocol]
+	if !ok {
+		protoID = u8proto.ProtoIDs[strings.ToLower(flowInfo.protocol)]
+	}
+
+	protoUpper := flowInfo.protocol
+	if protoUpper == "udp" {
+		protoUpper = "UDP"
+	} else if protoUpper == "tcp" {
+		protoUpper = "TCP"
+	} else {
+		protoUpper = strings.ToUpper(flowInfo.protocol)
+	}
+
+	ep.UpdateProxyStatistics("fqdn", protoUpper, flowInfo.serverAddrPort.Port(), h.bindPort, false, !dnsMsgDetails.Response, flowInfo.verdict)
 
 	// Ensure that there are no early returns from this function before the
 	// code below, otherwise the log record will not be made.
@@ -249,9 +262,6 @@ func (h *dnsMessageHandler) logDNSMessage(
 	logContext, lcncl := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer lcncl()
 	record, err := h.proxyAccessLogger.NewLogRecord(context.Background(), flowInfo.flowType, false,
-		func(lr *accesslog.LogRecord, _ accesslog.EndpointInfoRegistry) {
-			lr.TransportProtocol = accesslog.TransportProtocol(protoID)
-		},
 		accesslog.LogTags.Verdict(flowInfo.verdict, flowInfo.reason),
 		accesslog.LogTags.Addressing(logContext, flowInfo.addrInfo),
 		accesslog.LogTags.DNS(&accesslog.LogRecordDNS{
@@ -268,6 +278,8 @@ func (h *dnsMessageHandler) logDNSMessage(
 	if err != nil {
 		return fmt.Errorf("failed create log record: %w", err)
 	}
+
+	record.TransportProtocol = accesslog.TransportProtocol(protoID)
 
 	h.proxyAccessLogger.Log(record)
 
@@ -318,14 +330,18 @@ func (h *dnsMessageHandler) UpdateOnDNSMsg(lookupTime time.Time, ep *endpoint.En
 	stat.QnameLockTime.End(true)
 
 	if d := time.Since(mutexAcquireStart); d >= option.Config.DNSProxyLockTimeout {
-		h.logger.Warn(fmt.Sprintf("Name lock acquisition time took longer than expected. Potentially too many parallel DNS requests being processed, consider adjusting --%s and/or --%s", option.DNSProxyLockCount, option.DNSProxyLockTimeout),
-			logfields.DNSName, qname,
-			logfields.Duration, d,
-			logfields.Expected, option.Config.DNSProxyLockTimeout,
-		)
+		if h.logger.Enabled(context.TODO(), slog.LevelWarn) {
+			h.logger.Warn(fmt.Sprintf("Name lock acquisition time took longer than expected. Potentially too many parallel DNS requests being processed, consider adjusting --%s and/or --%s", option.DNSProxyLockCount, option.DNSProxyLockTimeout),
+				logfields.DNSName, qname,
+				logfields.Duration, d,
+				logfields.Expected, option.Config.DNSProxyLockTimeout,
+			)
+		}
 	}
 
-	h.logger.Debug("Recording DNS lookup in endpoint specific cache", logfields.EndpointID, ep.ID)
+	if h.logger.Enabled(context.TODO(), slog.LevelDebug) {
+		h.logger.Debug("Recording DNS lookup in endpoint specific cache", logfields.EndpointID, ep.ID)
+	}
 
 	// This must happen before the NameManager update below, to ensure that
 	// this data is included in the serialized Endpoint object.
@@ -343,10 +359,12 @@ func (h *dnsMessageHandler) UpdateOnDNSMsg(lookupTime time.Time, ep *endpoint.En
 	}
 	stat.UpdateEpCacheTime.End(true)
 
-	h.logger.Debug("Updating DNS name in cache from response to query",
-		logfields.DNSName, qname,
-		logfields.IPAddrs, responseIPs,
-	)
+	if h.logger.Enabled(context.TODO(), slog.LevelDebug) {
+		h.logger.Debug("Updating DNS name in cache from response to query",
+			logfields.DNSName, qname,
+			logfields.IPAddrs, responseIPs,
+		)
+	}
 
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), option.Config.FQDNProxyResponseMaxDelay)
 	defer updateCancel()
@@ -371,9 +389,11 @@ func (h *dnsMessageHandler) UpdateOnDNSMsg(lookupTime time.Time, ep *endpoint.En
 	// Policy updates for this name have been pushed out; we can release the lock.
 	h.nameManager.UnlockName(qname)
 
-	h.logger.Debug("Waited for endpoints to regenerate due to a DNS response",
-		logfields.Duration, time.Since(updateStart),
-		logfields.EndpointID, ep.GetID(),
-		logfields.DNSName, qname,
-	)
+	if h.logger.Enabled(context.TODO(), slog.LevelDebug) {
+		h.logger.Debug("Waited for endpoints to regenerate due to a DNS response",
+			logfields.Duration, time.Since(updateStart),
+			logfields.EndpointID, ep.GetID(),
+			logfields.DNSName, qname,
+		)
+	}
 }

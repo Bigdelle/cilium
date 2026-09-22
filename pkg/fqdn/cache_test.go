@@ -1424,3 +1424,26 @@ func Test_sortZombieMappingSlice(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkDNSCacheDump(b *testing.B) {
+	c := NewDNSCache(0)
+	now := time.Now()
+	for i := range 250 {
+		host := fmt.Sprintf("host-%03d.w1.memloop-dns.internal.", i)
+		ips := []netip.Addr{
+			netip.AddrFrom4([4]byte{198, 18, byte(i >> 8), byte((i&0xff)*4 + 1)}),
+			netip.AddrFrom4([4]byte{198, 18, byte(i >> 8), byte((i&0xff)*4 + 2)}),
+			netip.AddrFrom4([4]byte{198, 18, byte(i >> 8), byte((i&0xff)*4 + 3)}),
+			netip.AddrFrom4([4]byte{198, 18, byte(i >> 8), byte((i&0xff)*4 + 4)}),
+		}
+		c.Update(now, host, ips, 60)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		entries := c.Dump()
+		if len(entries) != 250 {
+			b.Fatalf("expected 250 entries, got %d", len(entries))
+		}
+	}
+}

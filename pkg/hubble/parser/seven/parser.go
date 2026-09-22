@@ -22,7 +22,6 @@ import (
 	ciliumLabels "github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/monitor/api"
 	"github.com/cilium/cilium/pkg/proxy/accesslog"
-	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/u8proto"
 )
@@ -334,13 +333,23 @@ func decodeLayer4(protocol accesslog.TransportProtocol, source, destination acce
 	}
 }
 
+var (
+	clusterLabel = ciliumLabels.NewLabel(k8sConst.PolicyLabelCluster, "", ciliumLabels.LabelSourceK8s)
+	boolTruePB   = &wrapperspb.BoolValue{Value: true}
+	boolFalsePB  = &wrapperspb.BoolValue{Value: false}
+	accessLogEvt = &flowpb.CiliumEventType{Type: int32(api.MessageTypeAccessLog)}
+)
+
 func decodeEndpoint(endpoint accesslog.EndpointInfo, namespace, podName, podUID string) *flowpb.Endpoint {
 	labels := endpoint.Labels.GetModel()
-	slices.Sort(labels)
+	if !slices.IsSorted(labels) {
+		slices.Sort(labels)
+	}
+	clusterName, _ := endpoint.Labels.LookupLabel(&clusterLabel)
 	return &flowpb.Endpoint{
 		ID:          uint32(endpoint.ID),
 		Identity:    uint32(endpoint.Identity),
-		ClusterName: endpoint.Labels.Get(string(source.Kubernetes) + ciliumLabels.SourceDelimiter + k8sConst.PolicyLabelCluster),
+		ClusterName: clusterName,
 		Namespace:   namespace,
 		Labels:      labels,
 		PodName:     podName,
@@ -378,12 +387,16 @@ func decodeLayer7(r *accesslog.LogRecord, opts *options.Options) *flowpb.Layer7 
 }
 
 func decodeIsReply(t accesslog.FlowType) *wrapperspb.BoolValue {
-	return &wrapperspb.BoolValue{
-		Value: t == accesslog.TypeResponse,
+	if t == accesslog.TypeResponse {
+		return boolTruePB
 	}
+	return boolFalsePB
 }
 
 func decodeCiliumEventType(eventType uint8) *flowpb.CiliumEventType {
+	if eventType == api.MessageTypeAccessLog {
+		return accessLogEvt
+	}
 	return &flowpb.CiliumEventType{
 		Type: int32(eventType),
 	}

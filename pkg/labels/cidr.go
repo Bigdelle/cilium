@@ -20,52 +20,53 @@ var (
 	WorldLabelV6 = Label{Source: LabelSourceReserved, Key: IDNameWorldIPv6}
 )
 
-// getCIDRLabel returns a Label representation of the given prefix. Should not be called for zero
-// length prefixes, that need to be represented with a world label.
-//
-// For IPv6 addresses, it converts ":" into "-" as EndpointSelectors don't
-// support colons inside the name section of a label.
 func getCIDRLabel(prefix netip.Prefix) Label {
-	ipv6 := prefix.Addr().Is6()
-	ipStr := prefix.Masked().Addr().String()
+	addr := prefix.Masked().Addr()
 	prefixLen := prefix.Bits()
+	ipv6 := addr.Is6()
+
+	var ipBuf [64]byte
+	ipBytes := addr.AppendTo(ipBuf[:0])
+
+	var numBuf [8]byte
+	numBytes := strconv.AppendInt(numBuf[:0], int64(prefixLen), 10)
 
 	var str strings.Builder
-	str.Grow(
-		1 /* preZero */ +
-			len(ipStr) +
-			1 /* postZero */ +
-			2 /*len of prefix*/ +
-			1, /* '/' */
-	)
-
-	// Only scan bytes individually if needed (for an IPv6 address)
 	if ipv6 {
-		for i := range len(ipStr) {
-			if ipStr[i] == ':' {
-				// EndpointSelector keys can't start or end with a "-", so insert a
-				// zero at the start or end if it would otherwise have a "-" at that
-				// position.
+		extra := 0
+		if len(ipBytes) > 0 {
+			if ipBytes[0] == ':' {
+				extra += 2
+			}
+			if ipBytes[len(ipBytes)-1] == ':' {
+				extra += 2
+			}
+		}
+		str.Grow(len(ipBytes) + extra + 1 + len(numBytes))
+
+		for i, b := range ipBytes {
+			if b == ':' {
 				if i == 0 {
 					str.WriteByte('0')
 					str.WriteByte('-')
 					continue
 				}
-				if i == len(ipStr)-1 {
+				if i == len(ipBytes)-1 {
 					str.WriteByte('-')
 					str.WriteByte('0')
 					continue
 				}
 				str.WriteByte('-')
 			} else {
-				str.WriteByte(ipStr[i])
+				str.WriteByte(b)
 			}
 		}
 	} else {
-		str.WriteString(ipStr)
+		str.Grow(len(ipBytes) + 1 + len(numBytes))
+		str.Write(ipBytes)
 	}
-	str.WriteRune('/')
-	str.WriteString(strconv.Itoa(prefixLen))
+	str.WriteByte('/')
+	str.Write(numBytes)
 
 	return Label{
 		Key:    str.String(),
