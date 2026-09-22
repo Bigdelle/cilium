@@ -36,3 +36,29 @@ func TestLookupFrontendByTuple(t *testing.T) {
 	require.False(t, found)
 	require.Nil(t, fe2)
 }
+
+func BenchmarkLookupFrontendByTuple(b *testing.B) {
+	db := statedb.New()
+	fes, err := NewFrontendsTable(DefaultConfig, db)
+	require.NoError(b, err)
+
+	var addr L3n4Addr
+	addr.ParseFromString("10.0.0.1:80/TCP")
+	wtxn := db.WriteTxn(fes)
+	fes.Insert(wtxn, &Frontend{FrontendParams: FrontendParams{Address: addr}})
+	txn := wtxn.Commit()
+
+	ac := addr.AddrCluster()
+	proto := addr.Protocol()
+	port := addr.Port()
+	scope := addr.Scope()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		_, found := LookupFrontendByTuple(txn, fes, ac, proto, port, scope)
+		if !found {
+			b.Fatal("expected found")
+		}
+	}
+}

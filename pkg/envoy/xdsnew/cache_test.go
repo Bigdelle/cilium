@@ -4,12 +4,22 @@
 package xdsnew
 
 import (
+	"hash/fnv"
+	"io"
+	"maps"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/util/rand"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1394,4 +1404,101 @@ func TestGetAllResources_DoesNotCallSnapshotCache(t *testing.T) {
 	assert.Empty(t, mock.setSnapshotCalls)
 	assert.Empty(t, mock.getSnapshotCalls)
 	assert.Empty(t, mock.clearSnapshotCalls)
+}
+
+// TestCacheHashMatchesStreamingFNV pins (*cacheImpl).hash to FNV-1a over
+// key\x00value\x00 in sorted key order, computed here with the stdlib hasher.
+// The inline implementation exists only to avoid the per-Write []byte(string)
+// allocations; it must not change the resulting version string.
+func TestCacheHashMatchesStreamingFNV(t *testing.T) {
+	c := &cacheImpl{}
+	resources := map[string]string{
+		"type.googleapis.com/envoy.config.listener.v3.Listener": `[{"name":"l1","resource":{"a":1}}]`,
+		"type.googleapis.com/envoy.config.cluster.v3.Cluster":   `[{"name":"c1","resource":{"b":2}}]`,
+		"":                     "",
+		"unicode-\u00e9\u00fc": "value with \x01 control bytes",
+	}
+
+	want := func() string {
+		hasher := fnv.New32a()
+		var zero [1]byte
+		for _, k := range slices.Sorted(maps.Keys(resources)) {
+			hasher.Write([]byte(k))
+			hasher.Write(zero[:])
+			hasher.Write([]byte(resources[k]))
+			hasher.Write(zero[:])
+		}
+		return rand.SafeEncodeString(strconv.FormatUint(uint64(hasher.Sum32()), 10))
+	}()
+
+	// Map iteration order must not affect the result.
+	for range 32 {
+		require.Equal(t, want, c.hash(resources))
+	}
+}
+
+// TestCacheHashIsConcurrencySafe fails under -race if (*cacheImpl).hash is ever
+// given shared mutable state again (for example by reusing the cacheImpl.hasher
+// field, which hash must not touch: it is called from both GetVersion and
+// GenerateSnapshot without c.mutex held).
+func TestCacheHashIsConcurrencySafe(t *testing.T) {
+	c := NewCache(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), false).(*cacheImpl)
+
+	inputs := make([]map[string]string, 8)
+	want := make([]string, len(inputs))
+	for i := range inputs {
+		inputs[i] = map[string]string{
+			"k":             strings.Repeat("payload", i+1),
+			strconv.Itoa(i): "v",
+		}
+		want[i] = c.hash(inputs[i])
+	}
+
+	var wg sync.WaitGroup
+	for range 64 {
+		for i := range inputs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if got := c.hash(inputs[i]); got != want[i] {
+					t.Errorf("concurrent hash(inputs[%d]) = %q, want %q", i, got, want[i])
+				}
+			}()
+		}
+	}
+	wg.Wait()
+}
+
+func benchmarkHashResources() map[string]string {
+	// Roughly the shape of a real snapshot: a handful of type URLs, each
+	// holding one large serialized resource array.
+	res := make(map[string]string, 7)
+	for _, typeURL := range []string{
+		envoy_resource.EndpointType, envoy_resource.ClusterType, envoy_resource.RouteType,
+		envoy_resource.ListenerType, envoy_resource.SecretType,
+		NetworkPolicyTypeURL, NetworkPolicyHostsTypeURL,
+	} {
+		var sb strings.Builder
+		sb.WriteByte('[')
+		for i := range 400 {
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			fmt.Fprintf(&sb, `{"name":"resource-%d","resource":{"field_a":%d,"field_b":"value-%d"}}`, i, i, i)
+		}
+		sb.WriteByte(']')
+		res[typeURL] = sb.String()
+	}
+	return res
+}
+
+func BenchmarkCacheHash(b *testing.B) {
+	c := NewCache(slog.New(slog.NewTextHandler(io.Discard, nil)), false).(*cacheImpl)
+	resources := benchmarkHashResources()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		_ = c.hash(resources)
+	}
 }
