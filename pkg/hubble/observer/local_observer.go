@@ -385,13 +385,14 @@ nextEvent:
 				mask.Copy(flow.ProtoReflect(), ev.ProtoReflect())
 				ev = flow
 			}
-			resp = &observerpb.GetFlowsResponse{
-				Time:     ev.GetTime(),
-				NodeName: ev.GetNodeName(),
-				ResponseTypes: &observerpb.GetFlowsResponse_Flow{
-					Flow: ev,
-				},
+			fdr := new(flowDeliveryResponse)
+			fdr.rt.Flow = ev
+			fdr.resp = observerpb.GetFlowsResponse{
+				Time:          ev.GetTime(),
+				NodeName:      ev.GetNodeName(),
+				ResponseTypes: &fdr.rt,
 			}
+			resp = &fdr.resp
 		case *flowpb.LostEvent:
 			// Don't increment eventsReader.eventCount as a LostEvent is an
 			// event type that is never explicitly requested by the user (e.g.
@@ -701,18 +702,38 @@ func (r *eventsReader) Next(ctx context.Context) (*v1.Event, error) {
 	}
 }
 
+// flowDeliveryResponse groups the GetFlowsResponse with the oneof wrapper it
+// always points at, so that delivering a flow costs one allocation instead of
+// two. Both have the lifetime of a single response.
+type flowDeliveryResponse struct {
+	resp observerpb.GetFlowsResponse
+	rt   observerpb.GetFlowsResponse_Flow
+}
+
 func (s *LocalObserverServer) trackNamespaces(flow *flowpb.Flow) {
 	// track namespaces seen.
-	if srcNs := flow.GetSource().GetNamespace(); srcNs != "" {
+	srcNs := flow.GetSource().GetNamespace()
+	dstNs := flow.GetDestination().GetNamespace()
+	if srcNs == "" && dstNs == "" {
+		return
+	}
+	cluster := nodeTypes.GetClusterName()
+	if srcNs != "" {
 		s.nsManager.AddNamespace(&observerpb.Namespace{
 			Namespace: srcNs,
-			Cluster:   nodeTypes.GetClusterName(),
+			Cluster:   cluster,
 		})
 	}
-	if dstNs := flow.GetDestination().GetNamespace(); dstNs != "" {
+	// Most flows are intra-namespace, so the destination is usually the
+	// namespace that was just added. AddNamespace keys on cluster/namespace and
+	// overwrites the record, so repeating the call within one flow stores the
+	// same namespace with an "added" timestamp from the same instant -- no
+	// observable difference, at the cost of an allocation and a round trip
+	// through the manager's write lock.
+	if dstNs != "" && dstNs != srcNs {
 		s.nsManager.AddNamespace(&observerpb.Namespace{
 			Namespace: dstNs,
-			Cluster:   nodeTypes.GetClusterName(),
+			Cluster:   cluster,
 		})
 	}
 }
