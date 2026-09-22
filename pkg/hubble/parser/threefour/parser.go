@@ -530,6 +530,28 @@ func decodePolicyMatchType(pvn *monitor.PolicyVerdictNotify) uint32 {
 	return 0
 }
 
+var (
+	boolValueTrue  = &wrapperspb.BoolValue{Value: true}
+	boolValueFalse = &wrapperspb.BoolValue{Value: false}
+
+	// eventTypeCache holds the CiliumEventType for every (type, subtype) pair
+	// that fits in the table. These messages are immutable constants, so one
+	// instance per pair can be shared by every flow instead of allocating a
+	// fresh one per event.
+	eventTypeCache [16][32]*pb.CiliumEventType
+)
+
+func init() {
+	for t := range 16 {
+		for st := range 32 {
+			eventTypeCache[t][st] = &pb.CiliumEventType{
+				Type:    int32(t),
+				SubType: int32(st),
+			}
+		}
+	}
+}
+
 func decodeEthernet(ethernet *layers.Ethernet) *pb.Ethernet {
 	return &pb.Ethernet{
 		Source:      ethernet.SrcMAC.String(),
@@ -561,20 +583,28 @@ func decodeIPv6(ipv6 *layers.IPv6) (ip *pb.IP, src, dst netip.Addr) {
 	}, src, dst
 }
 
+type decodedTCPLayer4 struct {
+	l4    pb.Layer4
+	proto pb.Layer4_TCP
+	tcp   pb.TCP
+	flags pb.TCPFlags
+}
+
 func decodeTCP(tcp *layers.TCP) (l4 *pb.Layer4, src, dst uint16) {
-	return &pb.Layer4{
-		Protocol: &pb.Layer4_TCP{
-			TCP: &pb.TCP{
-				SourcePort:      uint32(tcp.SrcPort),
-				DestinationPort: uint32(tcp.DstPort),
-				Flags: &pb.TCPFlags{
-					FIN: tcp.FIN, SYN: tcp.SYN, RST: tcp.RST,
-					PSH: tcp.PSH, ACK: tcp.ACK, URG: tcp.URG,
-					ECE: tcp.ECE, CWR: tcp.CWR, NS: tcp.NS,
-				},
-			},
-		},
-	}, uint16(tcp.SrcPort), uint16(tcp.DstPort)
+	c := new(decodedTCPLayer4)
+	c.flags = pb.TCPFlags{
+		FIN: tcp.FIN, SYN: tcp.SYN, RST: tcp.RST,
+		PSH: tcp.PSH, ACK: tcp.ACK, URG: tcp.URG,
+		ECE: tcp.ECE, CWR: tcp.CWR, NS: tcp.NS,
+	}
+	c.tcp = pb.TCP{
+		SourcePort:      uint32(tcp.SrcPort),
+		DestinationPort: uint32(tcp.DstPort),
+		Flags:           &c.flags,
+	}
+	c.proto.TCP = &c.tcp
+	c.l4.Protocol = &c.proto
+	return &c.l4, uint16(tcp.SrcPort), uint16(tcp.DstPort)
 }
 
 func decodeSCTP(sctp *layers.SCTP) (l4 *pb.Layer4, src, dst uint16) {
@@ -614,15 +644,21 @@ func decodeSCTPChunkType(payload []byte) pb.SCTPChunkType {
 	return chunktype
 }
 
+type decodedUDPLayer4 struct {
+	l4    pb.Layer4
+	proto pb.Layer4_UDP
+	udp   pb.UDP
+}
+
 func decodeUDP(udp *layers.UDP) (l4 *pb.Layer4, src, dst uint16) {
-	return &pb.Layer4{
-		Protocol: &pb.Layer4_UDP{
-			UDP: &pb.UDP{
-				SourcePort:      uint32(udp.SrcPort),
-				DestinationPort: uint32(udp.DstPort),
-			},
-		},
-	}, uint16(udp.SrcPort), uint16(udp.DstPort)
+	c := new(decodedUDPLayer4)
+	c.udp = pb.UDP{
+		SourcePort:      uint32(udp.SrcPort),
+		DestinationPort: uint32(udp.DstPort),
+	}
+	c.proto.UDP = &c.udp
+	c.l4.Protocol = &c.proto
+	return &c.l4, uint16(udp.SrcPort), uint16(udp.DstPort)
 }
 
 func decodeICMPv4(icmp *layers.ICMPv4) *pb.Layer4 {
@@ -669,14 +705,15 @@ func decodeIsReply(tn *monitor.TraceNotify, pvn *monitor.PolicyVerdictNotify) *w
 			return nil
 		}
 		// Reason was specified by the datapath, just reuse it.
-		return &wrapperspb.BoolValue{
-			Value: tn.TraceReasonIsReply(),
+		if tn.TraceReasonIsReply() {
+			return boolValueTrue
 		}
+		return boolValueFalse
 	case pvn != nil && pvn.Verdict >= 0:
 		// Forwarded PolicyVerdictEvents are emitted for the first packet of
 		// connection, therefore we statically assume that they are not reply
 		// packets
-		return &wrapperspb.BoolValue{Value: false}
+		return boolValueFalse
 	default:
 		// For other events, such as drops, we simply do not know if they were
 		// replies or not.
@@ -685,6 +722,9 @@ func decodeIsReply(tn *monitor.TraceNotify, pvn *monitor.PolicyVerdictNotify) *w
 }
 
 func decodeCiliumEventType(eventType, eventSubType uint8) *pb.CiliumEventType {
+	if eventType < 16 && eventSubType < 32 {
+		return eventTypeCache[eventType][eventSubType]
+	}
 	return &pb.CiliumEventType{
 		Type:    int32(eventType),
 		SubType: int32(eventSubType),
