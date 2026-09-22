@@ -117,7 +117,7 @@ func Reachability(blocks Blocks, insns asm.Instructions, variables map[string]*e
 	// lookup map. This notably includes references to non-constant variables,
 	// which will be rejected later in the branch evaluation logic. They are
 	// included here to ensure that the reachability analysis is conclusive.
-	vars := make(map[mapOffset]*ebpf.VariableSpec)
+	vars := make(map[mapOffset]*ebpf.VariableSpec, len(variables))
 	for _, v := range variables {
 		vars[mapOffset{
 			mapName: unique.Make(v.SectionName),

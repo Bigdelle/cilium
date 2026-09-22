@@ -5,6 +5,7 @@ package analyze
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"iter"
 	"math"
@@ -395,4 +396,37 @@ func BenchmarkReachabilityBPF(b *testing.B) {
 			}
 		}
 	})
+}
+
+// benchVariables builds a variable set of the shape a real datapath object
+// carries: a handful of datasecs, each holding many config constants.
+func benchVariables(n int) map[string]*ebpf.VariableSpec {
+	sections := []string{".rodata.config", ".rodata", ".data", ".bss"}
+	vars := make(map[string]*ebpf.VariableSpec, n)
+	for i := range n {
+		name := fmt.Sprintf("__config_%03d", i)
+		vars[name] = &ebpf.VariableSpec{
+			Name:        name,
+			SectionName: sections[i%len(sections)],
+			Offset:      uint32(i * 8),
+			Value:       make([]byte, 8),
+		}
+	}
+	return vars
+}
+
+func BenchmarkReachabilityVariables(b *testing.B) {
+	b.ReportAllocs()
+
+	insns := branchingProg(b, 1000)
+
+	blocks, err := computeBlocks(insns)
+	require.NoError(b, err)
+
+	variables := benchVariables(256)
+
+	for b.Loop() {
+		_, err = Reachability(blocks, insns, variables)
+		require.NoError(b, err)
+	}
 }
