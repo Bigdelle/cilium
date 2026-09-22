@@ -104,6 +104,26 @@ func (o *OpLabels) AllLabels() Labels {
 	return all
 }
 
+// Lookup returns the label stored under key, equivalently to indexing the map
+// returned by AllLabels, but without merging the four maps to do it.
+//
+// The sources are consulted in the reverse of the order AllLabels copies them,
+// so that the source that would have overwritten the others in the merged map
+// is the one that answers here.
+func (o *OpLabels) Lookup(key string) (Label, bool) {
+	if l, ok := o.OrchestrationInfo[key]; ok {
+		return l, true
+	}
+	if l, ok := o.OrchestrationIdentity[key]; ok {
+		return l, true
+	}
+	if l, ok := o.Disabled[key]; ok {
+		return l, true
+	}
+	l, ok := o.Custom[key]
+	return l, ok
+}
+
 func (o *OpLabels) ReplaceInformationLabels(sourceFilter string, l Labels, logger *slog.Logger) bool {
 	changed := false
 	keepers := make(keepMarks)

@@ -1172,17 +1172,14 @@ func (e *Endpoint) HasLabels(l labels.Labels) bool {
 // return 'false' if any label in l is not in the endpoint's labels.
 // e.mutex must be RLock()ed.
 func (e *Endpoint) hasLabelsRLocked(l labels.Labels) bool {
-	allEpLabels := e.labels.AllLabels()
-
 	for _, v := range l {
-		found := false
-		for _, j := range allEpLabels {
-			if j.Equals(&v) {
-				found = true
-				break
-			}
-		}
-		if !found {
+		// labels.Labels is keyed by Label.Key and Label.Equals requires
+		// the keys to match, so the only label that can possibly equal v
+		// is the one stored under v.Key. Scanning every label of the
+		// endpoint, as this used to, could never find a match anywhere
+		// else -- and it had to merge all four of the endpoint's label
+		// maps into a new one first just to do the scan.
+		if j, ok := e.labels.Lookup(v.Key); !ok || !j.Equals(&v) {
 			return false
 		}
 	}

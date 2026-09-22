@@ -81,8 +81,7 @@ func (m *CachingIdentityAllocator) GetIdentities() IdentitiesModel {
 	if m.isGlobalIdentityAllocatorInitialized() {
 		m.IdentityAllocator.ForeachCache(func(id idpool.ID, val allocator.AllocatorKey) {
 			if gi, ok := val.(*key.GlobalIdentity); ok {
-				identity := identity.NewIdentityFromLabelArray(identity.NumericIdentity(id), gi.LabelArray)
-				identities = append(identities, identitymodel.CreateModel(identity))
+				identities = append(identities, identitymodel.CreateModelFromLabelArray(identity.NumericIdentity(id), gi.LabelArray))
 			}
 
 		})
