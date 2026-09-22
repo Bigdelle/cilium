@@ -4,6 +4,7 @@
 package labels
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -301,5 +302,75 @@ func TestLabelArrayListMergeSorted(t *testing.T) {
 		as = MergeSortedLabelArrayListStrings(as, bs)
 		require.Equal(t, tc.expected.ArrayListString(), as, tc.name+" MergeSortedLabelArrayListStrings")
 		require.Equal(t, a.Sort().ArrayListString(), as, tc.name+" MergeSortedLabelArrayListStrings returned unsorted result")
+	}
+}
+
+// labelArrayListFromStringSplit is the strings.Split-based implementation that
+// LabelArrayListFromString replaced. It is kept here so the replacement can be
+// checked against it directly, including on inputs with empty segments that
+// the production code is never expected to see but must still agree on.
+func labelArrayListFromStringSplit(str LabelArrayListString) (ls LabelArrayList) {
+	if len(str) > 2 && str[0] == '[' && str[len(str)-1] == ']' {
+		str = str[1 : len(str)-1]
+		arrays := strings.Split(string(str), "], [")
+		for i := range arrays {
+			labels := strings.Split(arrays[i], " ")
+			var la LabelArray
+			for j := range labels {
+				la = append(la, ParseLabel(labels[j]))
+			}
+			ls = append(ls, la)
+		}
+	}
+	return ls
+}
+
+func TestLabelArrayListFromStringMatchesSplit(t *testing.T) {
+	for _, str := range []LabelArrayListString{
+		"",
+		"[]",
+		"[x]",
+		"[any:x=y]",
+		"[foo:a=b foo:c=d]",
+		"[foo:a=b foo:c=d], [any:x=y]",
+		"[foo:a=b foo:c=d], [any:x=y], [k8s:z]",
+		"[a], [], [b]",
+		"[], []",
+		"[ ]",
+		"[a  b]",
+		"[a b ]",
+		"[ a b]",
+		"not a list",
+		"[unterminated",
+		"unstarted]",
+	} {
+		t.Run(string(str), func(t *testing.T) {
+			require.Equal(t, labelArrayListFromStringSplit(str), LabelArrayListFromString(str))
+		})
+	}
+}
+
+func TestLabelArrayListFromStringRoundTrips(t *testing.T) {
+	ls := LabelArrayList{
+		ParseLabelArray("k8s:app=frontend", "k8s:io.kubernetes.pod.namespace=default"),
+		ParseLabelArray("any:env=prod"),
+		ParseLabelArray("reserved:host"),
+	}
+	require.Equal(t, ls, LabelArrayListFromString(ls.ArrayListString()))
+}
+
+var sinkLabelArrayList LabelArrayList
+
+func BenchmarkLabelArrayListFromString(b *testing.B) {
+	str := LabelArrayList{
+		ParseLabelArray("k8s:app=frontend", "k8s:io.kubernetes.pod.namespace=default", "k8s:tier=web"),
+		ParseLabelArray("any:env=prod", "any:region=us-central1"),
+		ParseLabelArray("reserved:host"),
+		ParseLabelArray("k8s:app=backend", "k8s:io.kubernetes.pod.namespace=kube-system"),
+	}.ArrayListString()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		sinkLabelArrayList = LabelArrayListFromString(str)
 	}
 }

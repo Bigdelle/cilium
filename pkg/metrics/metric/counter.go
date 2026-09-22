@@ -4,6 +4,8 @@
 package metric
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -88,6 +90,58 @@ func NewCounterVecWithLabels(opts CounterOpts, labels Labels) *counterVec {
 type counterVec struct {
 	*prometheus.CounterVec
 	metric
+
+	// cache memoizes the Counter wrapper for each underlying
+	// prometheus.Counter, so that the hot WithLabelValues path does not
+	// allocate a wrapper per call.
+	//
+	// Every method that can remove a metric from the embedded CounterVec must
+	// also evict from here, otherwise the entry -- and the dead
+	// prometheus.Counter it is keyed by -- stays reachable forever. See Reset,
+	// Delete, DeleteLabelValues and DeletePartialMatch below.
+	cache sync.Map
+}
+
+func (cv *counterVec) wrapCounter(promCounter prometheus.Counter) Counter {
+	if v, ok := cv.cache.Load(promCounter); ok {
+		return v.(Counter)
+	}
+	c := &counter{
+		Counter: promCounter,
+		metric:  cv.metric,
+	}
+	cv.cache.Store(promCounter, c)
+	return c
+}
+
+func (cv *counterVec) Reset() {
+	cv.cache.Clear()
+	cv.CounterVec.Reset()
+}
+
+// Delete removes the metric for the given labels and drops the cached wrapper.
+//
+// The whole cache is cleared rather than the single entry: the wrapper is keyed
+// by the prometheus.Counter, which is not recoverable from the labels once the
+// child has been deleted. Deletions are rare compared to WithLabelValues, and
+// the cache refills lazily.
+func (cv *counterVec) Delete(labels prometheus.Labels) bool {
+	cv.cache.Clear()
+	return cv.CounterVec.Delete(labels)
+}
+
+// DeleteLabelValues removes the metric for the given label values and drops the
+// cached wrappers. See Delete for why the whole cache is cleared.
+func (cv *counterVec) DeleteLabelValues(lvs ...string) bool {
+	cv.cache.Clear()
+	return cv.CounterVec.DeleteLabelValues(lvs...)
+}
+
+// DeletePartialMatch removes all metrics matching the given labels and drops the
+// cached wrappers. See Delete for why the whole cache is cleared.
+func (cv *counterVec) DeletePartialMatch(labels prometheus.Labels) int {
+	cv.cache.Clear()
+	return cv.CounterVec.DeletePartialMatch(labels)
 }
 
 func (cv *counterVec) CurryWith(labels prometheus.Labels) (Vec[Counter], error) {
@@ -102,10 +156,7 @@ func (cv *counterVec) CurryWith(labels prometheus.Labels) (Vec[Counter], error) 
 func (cv *counterVec) GetMetricWith(labels prometheus.Labels) (Counter, error) {
 	promCounter, err := cv.CounterVec.GetMetricWith(labels)
 	if err == nil {
-		return &counter{
-			Counter: promCounter,
-			metric:  cv.metric,
-		}, nil
+		return cv.wrapCounter(promCounter), nil
 	}
 	return nil, err
 }
@@ -113,10 +164,7 @@ func (cv *counterVec) GetMetricWith(labels prometheus.Labels) (Counter, error) {
 func (cv *counterVec) GetMetricWithLabelValues(lvs ...string) (Counter, error) {
 	promCounter, err := cv.CounterVec.GetMetricWithLabelValues(lvs...)
 	if err == nil {
-		return &counter{
-			Counter: promCounter,
-			metric:  cv.metric,
-		}, nil
+		return cv.wrapCounter(promCounter), nil
 	}
 	return nil, err
 }
@@ -124,19 +172,13 @@ func (cv *counterVec) GetMetricWithLabelValues(lvs ...string) (Counter, error) {
 func (cv *counterVec) With(labels prometheus.Labels) Counter {
 	cv.checkLabels(labels)
 	promCounter := cv.CounterVec.With(labels)
-	return &counter{
-		Counter: promCounter,
-		metric:  cv.metric,
-	}
+	return cv.wrapCounter(promCounter)
 }
 
 func (cv *counterVec) WithLabelValues(lvs ...string) Counter {
 	cv.checkLabelValues(lvs...)
 	promCounter := cv.CounterVec.WithLabelValues(lvs...)
-	return &counter{
-		Counter: promCounter,
-		metric:  cv.metric,
-	}
+	return cv.wrapCounter(promCounter)
 }
 
 func (cv *counterVec) SetEnabled(e bool) {

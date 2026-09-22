@@ -11,9 +11,9 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	envoy_config_core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_config_endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
@@ -240,16 +240,48 @@ func NewCache(logger *slog.Logger, strictAdsMode bool) Cache {
 	}
 }
 
-func (c *cacheImpl) hash(resources map[string]string) string {
-	hasher := fnv.New32a()
-	printer := spew.ConfigState{
-		Indent:         " ",
-		SortKeys:       true,
-		DisableMethods: true,
-		SpewKeys:       true,
+const (
+	fnv32aOffsetBasis = 2166136261
+	fnv32aPrime       = 16777619
+)
+
+// fnv32aAddByte folds b into the running FNV-1a 32-bit hash h.
+func fnv32aAddByte(h uint32, b byte) uint32 {
+	return (h ^ uint32(b)) * fnv32aPrime
+}
+
+// fnv32aAddString folds s into the running FNV-1a 32-bit hash h.
+//
+// This indexes s directly rather than going through hash.Hash32.Write, which
+// would need a []byte(s) conversion per call. Because Write is an interface
+// method the compiler cannot prove the conversion does not escape, so each one
+// would heap-allocate a copy of the resource payload.
+func fnv32aAddString(h uint32, s string) uint32 {
+	for i := 0; i < len(s); i++ {
+		h = fnv32aAddByte(h, s[i])
 	}
-	printer.Fprintf(hasher, "%#v", resources)
-	return rand.SafeEncodeString(fmt.Sprint(hasher.Sum32()))
+	return h
+}
+
+// hash computes the version string for a set of encoded resources.
+//
+// It is a pure function of resources and holds no state between calls: hash is
+// reached from both GetVersion and GenerateSnapshot without c.mutex held, so a
+// hasher shared on cacheImpl would be both a data race and a correctness bug
+// (interleaved Writes would produce a version that matches neither snapshot).
+func (c *cacheImpl) hash(resources map[string]string) string {
+	keys := slices.Sorted(maps.Keys(resources))
+
+	// Key and value are each terminated with a NUL byte so that the
+	// concatenation is unambiguous.
+	h := uint32(fnv32aOffsetBasis)
+	for _, k := range keys {
+		h = fnv32aAddString(h, k)
+		h = fnv32aAddByte(h, 0)
+		h = fnv32aAddString(h, resources[k])
+		h = fnv32aAddByte(h, 0)
+	}
+	return rand.SafeEncodeString(strconv.FormatUint(uint64(h), 10))
 }
 
 func (c *cacheImpl) GetVersion(resources *xds.Resources) string {
