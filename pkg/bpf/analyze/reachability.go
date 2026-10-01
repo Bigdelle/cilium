@@ -81,6 +81,9 @@ type Reachable struct {
 	// j is a bitmap tracking predicted jumps. If the nth bit is 1, the jump
 	// at the end of block n is predicted to always be taken.
 	j Bitmap
+
+	// buf backs l and j inline for block counts up to 1024 to avoid a separate heap allocation.
+	buf [32]uint64
 }
 
 // Reachability determines whether or not each Block in blocks is reachable
@@ -117,19 +120,30 @@ func Reachability(blocks Blocks, insns asm.Instructions, variables map[string]*e
 	// lookup map. This notably includes references to non-constant variables,
 	// which will be rejected later in the branch evaluation logic. They are
 	// included here to ensure that the reachability analysis is conclusive.
-	vars := make(map[mapOffset]*ebpf.VariableSpec)
-	for _, v := range variables {
-		vars[mapOffset{
-			mapName: unique.Make(v.SectionName),
-			offset:  v.Offset,
-		}] = v
+	var vars map[mapOffset]*ebpf.VariableSpec
+	if len(variables) > 0 {
+		vars = make(map[mapOffset]*ebpf.VariableSpec, len(variables))
+		for _, v := range variables {
+			vars[mapOffset{
+				mapName: unique.Make(v.SectionName),
+				offset:  v.Offset,
+			}] = v
+		}
 	}
+
+	n := blocks.count()
+	words := (n + 63) / 64
 
 	r := &Reachable{
 		blocks: blocks,
 		insns:  insns,
-		l:      NewBitmap(uint64(blocks.count())),
-		j:      NewBitmap(uint64(blocks.count())),
+	}
+
+	if words*2 <= uint64(len(r.buf)) {
+		r.l = Bitmap(r.buf[:words:words])
+		r.j = Bitmap(r.buf[words : words*2 : words*2])
+	} else {
+		r.l, r.j = newBitmapPair(n)
 	}
 
 	// Start recursing at first block since it is always live.
@@ -138,6 +152,12 @@ func Reachability(blocks Blocks, insns asm.Instructions, variables map[string]*e
 	}
 
 	return r, nil
+}
+
+func newBitmapPair(n uint64) (Bitmap, Bitmap) {
+	words := (n + 63) / 64
+	buf := make([]uint64, words*2)
+	return Bitmap(buf[:words:words]), Bitmap(buf[words:])
 }
 
 // Blocks returns an iterator over the blocks in the program, yielding each

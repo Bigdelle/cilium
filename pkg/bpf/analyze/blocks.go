@@ -448,15 +448,11 @@ func (i *Iterator) Backtrack() *Backtracker {
 	return newBacktracker(i.block, i.insns).Seek(i.insnIdx)
 }
 
-// Backtracker is an iterator that walks backwards through a Block's
-// instructions.
-//
-// This is useful for finding the last instruction that wrote to a register
-// before it is read, by following the control flow backwards.
 type Backtracker struct {
 	insns asm.Instructions
 
 	block   *Block
+	origin  *Block
 	visited []*Block
 
 	index int
@@ -518,9 +514,6 @@ func (bt *Backtracker) Seek(index int) *Backtracker {
 	return bt
 }
 
-// previousBlock rolls over the Backtracker to the first and only predecessor of
-// the current block, if any. Returns false if there is no predecessor or if
-// there are multiple predecessors.
 func (bt *Backtracker) previousBlock() bool {
 	if len(bt.block.predecessors) != 1 {
 		return false
@@ -540,9 +533,15 @@ func (bt *Backtracker) previousBlock() bool {
 		// Never roll over to self.
 		return false
 	}
-	if len(bt.visited) == 0 {
-		// First rollover, initialize visited list in a single allocation.
-		bt.visited = []*Block{bt.block, pred}
+	if bt.origin == nil {
+		// First rollover, track the origin block without allocating a slice.
+		bt.origin = bt.block
+	} else if len(bt.visited) == 0 {
+		// Second rollover, check against origin before allocating visited slice.
+		if pred == bt.origin {
+			return false
+		}
+		bt.visited = []*Block{bt.origin, bt.block, pred}
 	} else {
 		// Subsequent rollovers, check visited list and append if needed.
 		if slices.Contains(bt.visited, pred) {
