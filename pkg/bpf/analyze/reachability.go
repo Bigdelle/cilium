@@ -117,7 +117,7 @@ func Reachability(blocks Blocks, insns asm.Instructions, variables map[string]*e
 	// lookup map. This notably includes references to non-constant variables,
 	// which will be rejected later in the branch evaluation logic. They are
 	// included here to ensure that the reachability analysis is conclusive.
-	vars := make(map[mapOffset]*ebpf.VariableSpec)
+	vars := make(map[mapOffset]*ebpf.VariableSpec, len(variables))
 	for _, v := range variables {
 		vars[mapOffset{
 			mapName: unique.Make(v.SectionName),
@@ -125,11 +125,13 @@ func Reachability(blocks Blocks, insns asm.Instructions, variables map[string]*e
 		}] = v
 	}
 
+	l, j := newBitmapPair(blocks.count())
+
 	r := &Reachable{
 		blocks: blocks,
 		insns:  insns,
-		l:      NewBitmap(uint64(blocks.count())),
-		j:      NewBitmap(uint64(blocks.count())),
+		l:      l,
+		j:      j,
 	}
 
 	// Start recursing at first block since it is always live.
@@ -138,6 +140,15 @@ func Reachability(blocks Blocks, insns asm.Instructions, variables map[string]*e
 	}
 
 	return r, nil
+}
+
+// newBitmapPair returns two independent Bitmaps of n bits each that share
+// one backing allocation. The first is capacity-capped so that an append on
+// it can never write into the second.
+func newBitmapPair(n uint64) (Bitmap, Bitmap) {
+	w := (n + (wordSize - 1)) / wordSize
+	buf := make(Bitmap, 2*w)
+	return buf[:w:w], buf[w:]
 }
 
 // Blocks returns an iterator over the blocks in the program, yielding each

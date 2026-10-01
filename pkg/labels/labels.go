@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/cilium/cilium/pkg/container/cache"
 	"github.com/cilium/cilium/pkg/logging"
@@ -204,7 +205,6 @@ var (
 	k8sSourceDelimiter = labelSourceDelimiter(PathDelimiter[0])
 )
 
-// Label is Cilium's representation of a label.
 type Label struct {
 	Key   string `json:"key"`
 	Value string `json:"value,omitempty"`
@@ -216,6 +216,9 @@ type Label struct {
 	// optimization for CIDR prefixes
 	// +deepequal-gen=false
 	cidr *netip.Prefix `json:"-"`
+
+	// +deepequal-gen=false
+	str string `json:"-"`
 }
 
 // GetCIDRPrefix returns the cidr of the Label, or nil if none.
@@ -467,10 +470,15 @@ func (l *Label) HasKey(target *Label) bool {
 // String returns the string representation of Label in the for of Source:Key=Value or
 // Source:Key if Value is empty.
 func (l *Label) String() string {
-	if len(l.Value) != 0 {
-		return l.Source + SourceDelimiter + l.Key + "=" + l.Value
+	if l.str != "" {
+		return l.str
 	}
-	return l.Source + SourceDelimiter + l.Key
+	if len(l.Value) != 0 {
+		l.str = l.Source + SourceDelimiter + l.Key + "=" + l.Value
+	} else {
+		l.str = l.Source + SourceDelimiter + l.Key
+	}
+	return l.str
 }
 
 func (l *Label) BuildString(sb *strings.Builder) {
@@ -714,31 +722,56 @@ func (l Label) formatForKVStoreInto(buf *bytes.Buffer) {
 	buf.WriteRune(';')
 }
 
+var sortedListKeysPool = sync.Pool{
+	New: func() any {
+		s := make([]string, 0, 32)
+		return &s
+	},
+}
+
 // SortedList returns the labels as a sorted list, separated by semicolon
 //
 // DO NOT BREAK THE FORMAT OF THIS. THE RETURNED STRING IS USED AS KEY IN
 // THE KEY-VALUE STORE.
 func (l Labels) SortedList() []byte {
-	keys := slices.Sorted(maps.Keys(l))
-
-	// Labels can have arbitrary size. However, when many CIDR identities are in
-	// the system, for example due to a FQDN policy matching S3, CIDR labels
-	// dominate in number. IPv4 CIDR labels in serialized form are max 25 bytes
-	// long. Allocate slightly more to avoid having a realloc if there's some
-	// other labels which may longer, since the cost of allocating a few bytes
-	// more is dominated by a second allocation, especially since these
-	// allocations are short-lived.
-	//
-	// cidr:123.123.123.123/32=;
-	// 0        1         2
-	// 1234567890123456789012345
-	b := make([]byte, 0, len(keys)*30)
-	buf := bytes.NewBuffer(b)
-	for _, k := range keys {
-		l[k].formatForKVStoreInto(buf)
+	if len(l) == 0 {
+		return []byte{}
 	}
 
-	return buf.Bytes()
+	sp := sortedListKeysPool.Get().(*[]string)
+	keys := *sp
+	if cap(keys) < len(l) {
+		keys = make([]string, 0, len(l))
+	} else {
+		keys = keys[:0]
+	}
+
+	totalLen := 0
+	for k, lbl := range l {
+		keys = append(keys, k)
+		totalLen += len(lbl.Source) + len(lbl.Key) + len(lbl.Value) + 3
+	}
+
+	slices.Sort(keys)
+
+	b := make([]byte, 0, totalLen)
+	for _, k := range keys {
+		lbl := l[k]
+		b = append(b, lbl.Source...)
+		b = append(b, byte(sourceDelimiter))
+		b = append(b, lbl.Key...)
+		b = append(b, '=')
+		b = append(b, lbl.Value...)
+		b = append(b, ';')
+	}
+
+	clear(keys)
+	if cap(keys) <= 4096 {
+		*sp = keys[:0]
+		sortedListKeysPool.Put(sp)
+	}
+
+	return b
 }
 
 // ToSlice returns a slice of label with the values of the given
