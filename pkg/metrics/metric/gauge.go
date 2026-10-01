@@ -11,7 +11,7 @@ import (
 func NewGauge(opts GaugeOpts) Gauge {
 	return &gauge{
 		Gauge: prometheus.NewGauge(opts.toPrometheus()),
-		metric: metric{
+		metric: &metric{
 			enabled: !opts.Disabled,
 			opts:    Opts(opts),
 		},
@@ -27,7 +27,7 @@ type Gauge interface {
 
 type gauge struct {
 	prometheus.Gauge
-	metric
+	*metric
 }
 
 func (g *gauge) Get() float64 {
@@ -105,7 +105,7 @@ func (gv *gaugeVec) GetMetricWith(labels prometheus.Labels) (Gauge, error) {
 	if err == nil {
 		return &gauge{
 			Gauge:  promGauge,
-			metric: gv.metric,
+			metric: &gv.metric,
 		}, nil
 	}
 	return nil, err
@@ -116,7 +116,7 @@ func (gv *gaugeVec) GetMetricWithLabelValues(lvs ...string) (Gauge, error) {
 	if err == nil {
 		return &gauge{
 			Gauge:  promGauge,
-			metric: gv.metric,
+			metric: &gv.metric,
 		}, nil
 	}
 	return nil, err
@@ -128,7 +128,7 @@ func (gv *gaugeVec) With(labels prometheus.Labels) Gauge {
 	promGauge := gv.GaugeVec.With(labels)
 	return &gauge{
 		Gauge:  promGauge,
-		metric: gv.metric,
+		metric: &gv.metric,
 	}
 }
 
@@ -138,7 +138,7 @@ func (gv *gaugeVec) WithLabelValues(lvs ...string) Gauge {
 	promGauge := gv.GaugeVec.WithLabelValues(lvs...)
 	return &gauge{
 		Gauge:  promGauge,
-		metric: gv.metric,
+		metric: &gv.metric,
 	}
 }
 
@@ -158,7 +158,7 @@ type GaugeFunc interface {
 func NewGaugeFunc(opts GaugeOpts, function func() float64) GaugeFunc {
 	return &gaugeFunc{
 		GaugeFunc: prometheus.NewGaugeFunc(opts.toPrometheus(), function),
-		metric: metric{
+		metric: &metric{
 			enabled: !opts.Disabled,
 			opts:    Opts(opts),
 		},
@@ -167,7 +167,7 @@ func NewGaugeFunc(opts GaugeOpts, function func() float64) GaugeFunc {
 
 type gaugeFunc struct {
 	prometheus.GaugeFunc
-	metric
+	*metric
 }
 
 type GaugeOpts Opts
