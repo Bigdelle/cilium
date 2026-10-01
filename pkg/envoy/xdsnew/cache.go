@@ -12,6 +12,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/davecgh/go-spew/spew"
 	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -460,27 +461,52 @@ func sdsReferenceVersionContext(resources *xds.Resources) string {
 }
 
 func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_types.Resource, versionContext ...string) (string, error) {
-	keys := slices.Collect(maps.Keys(resources))
+	n := len(resources)
+	var keys []string
+	var stackKeys [32]string
+	if n <= len(stackKeys) {
+		keys = stackKeys[:0]
+		for k := range resources {
+			keys = append(keys, k)
+		}
+	} else {
+		keys = slices.Collect(maps.Keys(resources))
+	}
 	slices.Sort(keys)
-	var sb strings.Builder
+
+	bufPtr := protoMarshalBufferPool.Get().(*[]byte)
+	buf := (*bufPtr)[:0]
+	defer func() {
+		if cap(buf) <= 4096 {
+			*bufPtr = buf[:0]
+			protoMarshalBufferPool.Put(bufPtr)
+		}
+	}()
+
+	hasher := fnv.New32a()
+	opts := proto.MarshalOptions{Deterministic: true}
+
 	for _, name := range keys {
-		encodedResource, err := marshal(resources[name])
+		hasher.Write([]byte(name))
+		var err error
+		buf, err = opts.MarshalAppend(buf[:0], resources[name])
 		if err != nil {
 			return "", err
 		}
-		sb.WriteString(name)
-		sb.WriteString(encodedResource)
+		hasher.Write(buf)
 	}
+
 	for _, context := range versionContext {
 		if context == "" {
 			continue
 		}
-		sb.WriteByte(0)
-		sb.WriteString("version-context")
-		sb.WriteByte(0)
-		sb.WriteString(context)
+		hasher.Write([]byte{0})
+		hasher.Write([]byte("version-context"))
+		hasher.Write([]byte{0})
+		hasher.Write([]byte(context))
 	}
-	return c.hash(map[string]string{typeURL: sb.String()}), nil
+
+	return fmt.Sprintf("%d", hasher.Sum32()), nil
 }
 
 // normalizeSnapshotResources returns the resource view used to build an ADS
@@ -771,4 +797,11 @@ func (c *cacheImpl) AreDifferentSnapshots(left, right cache.ResourceSnapshot) bo
 		}
 	}
 	return false
+}
+
+var protoMarshalBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 1024)
+		return &b
+	},
 }
