@@ -205,7 +205,6 @@ var (
 	k8sSourceDelimiter = labelSourceDelimiter(PathDelimiter[0])
 )
 
-// Label is Cilium's representation of a label.
 type Label struct {
 	Key   string `json:"key"`
 	Value string `json:"value,omitempty"`
@@ -217,6 +216,9 @@ type Label struct {
 	// optimization for CIDR prefixes
 	// +deepequal-gen=false
 	cidr *netip.Prefix `json:"-"`
+
+	// +deepequal-gen=false
+	str string `json:"-"`
 }
 
 // GetCIDRPrefix returns the cidr of the Label, or nil if none.
@@ -468,10 +470,15 @@ func (l *Label) HasKey(target *Label) bool {
 // String returns the string representation of Label in the for of Source:Key=Value or
 // Source:Key if Value is empty.
 func (l *Label) String() string {
-	if len(l.Value) != 0 {
-		return l.Source + SourceDelimiter + l.Key + "=" + l.Value
+	if l.str != "" {
+		return l.str
 	}
-	return l.Source + SourceDelimiter + l.Key
+	if len(l.Value) != 0 {
+		l.str = l.Source + SourceDelimiter + l.Key + "=" + l.Value
+	} else {
+		l.str = l.Source + SourceDelimiter + l.Key
+	}
+	return l.str
 }
 
 func (l *Label) BuildString(sb *strings.Builder) {
