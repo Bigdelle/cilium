@@ -448,15 +448,18 @@ func (i *Iterator) Backtrack() *Backtracker {
 	return newBacktracker(i.block, i.insns).Seek(i.insnIdx)
 }
 
-// Backtracker is an iterator that walks backwards through a Block's
-// instructions.
-//
-// This is useful for finding the last instruction that wrote to a register
-// before it is read, by following the control flow backwards.
 type Backtracker struct {
 	insns asm.Instructions
 
-	block   *Block
+	block *Block
+
+	// origin is the block the backtracker was in before its first rollover to
+	// a predecessor. It is nil until the first rollover happens.
+	origin *Block
+
+	// visited holds intermediate blocks that were rolled over, excluding origin
+	// and the current block. It is only allocated when a backtrack crosses
+	// three or more blocks.
 	visited []*Block
 
 	index int
@@ -518,9 +521,6 @@ func (bt *Backtracker) Seek(index int) *Backtracker {
 	return bt
 }
 
-// previousBlock rolls over the Backtracker to the first and only predecessor of
-// the current block, if any. Returns false if there is no predecessor or if
-// there are multiple predecessors.
 func (bt *Backtracker) previousBlock() bool {
 	if len(bt.block.predecessors) != 1 {
 		return false
@@ -534,21 +534,22 @@ func (bt *Backtracker) previousBlock() bool {
 	// predecessor, either because of a positive match, the register got
 	// clobbered, or because of multiple grandparents.
 	//
-	// Maintaining a visited list tends to dominate the CPU and memory profiles of
-	// the backtracking process, so avoid it whenever possible.
+	// The set of visited blocks is {origin, visited..., bt.block}. The current
+	// block is covered by the self check, the origin lives in a fixed field,
+	// and only intermediate blocks spill into the visited slice. Most
+	// backtracks never reach that slice, so they allocate nothing.
 	if pred == bt.block {
 		// Never roll over to self.
 		return false
 	}
-	if len(bt.visited) == 0 {
-		// First rollover, initialize visited list in a single allocation.
-		bt.visited = []*Block{bt.block, pred}
+	if bt.origin == nil {
+		// First rollover, remember where we came from without allocating.
+		bt.origin = bt.block
 	} else {
-		// Subsequent rollovers, check visited list and append if needed.
-		if slices.Contains(bt.visited, pred) {
+		if pred == bt.origin || slices.Contains(bt.visited, pred) {
 			return false
 		}
-		bt.visited = append(bt.visited, pred)
+		bt.visited = append(bt.visited, bt.block)
 	}
 
 	bt.block = pred
