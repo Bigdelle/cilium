@@ -11,7 +11,9 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/davecgh/go-spew/spew"
 	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -90,13 +92,17 @@ var snapshotResourceTypes = []envoy_resource.Type{
 }
 
 func newCiliumSnapshot(resources map[string]cache.Resources) *ciliumSnapshot {
-	w := &ciliumSnapshot{
-		Resources: make(map[string]cache.Resources, len(snapshotResourceTypes)),
+	if resources == nil {
+		resources = make(map[string]cache.Resources, len(snapshotResourceTypes))
 	}
 	for _, typeURL := range snapshotResourceTypes {
-		w.Resources[typeURL] = resources[typeURL]
+		if _, ok := resources[typeURL]; !ok {
+			resources[typeURL] = cache.Resources{}
+		}
 	}
-	return w
+	return &ciliumSnapshot{
+		Resources: resources,
+	}
 }
 
 func (w *ciliumSnapshot) GetVersion(typeURL string) string {
@@ -459,28 +465,69 @@ func sdsReferenceVersionContext(resources *xds.Resources) string {
 	return resourceReferencesVersionContext(refs)
 }
 
+var (
+	resourceVersionBufferPool = sync.Pool{
+		New: func() any {
+			b := make([]byte, 0, 4096)
+			return &b
+		},
+	}
+	resourceVersionHasherPool = sync.Pool{
+		New: func() any {
+			return fnv.New32a()
+		},
+	}
+)
+
 func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_types.Resource, versionContext ...string) (string, error) {
-	keys := slices.Collect(maps.Keys(resources))
+	keys := make([]string, 0, len(resources))
+	for name := range resources {
+		keys = append(keys, name)
+	}
 	slices.Sort(keys)
-	var sb strings.Builder
+
+	hasher := resourceVersionHasherPool.Get().(hash.Hash32)
+	hasher.Reset()
+
+	bufPtr := resourceVersionBufferPool.Get().(*[]byte)
+	buf := (*bufPtr)[:0]
+	defer func() {
+		if cap(buf) <= 65536 {
+			*bufPtr = buf[:0]
+			resourceVersionBufferPool.Put(bufPtr)
+		}
+		resourceVersionHasherPool.Put(hasher)
+	}()
+
+	protoOpts := proto.MarshalOptions{Deterministic: true}
 	for _, name := range keys {
-		encodedResource, err := marshal(resources[name])
+		buf = buf[:0]
+		buf = append(buf, name...)
+		var err error
+		buf, err = protoOpts.MarshalAppend(buf, resources[name])
 		if err != nil {
 			return "", err
 		}
-		sb.WriteString(name)
-		sb.WriteString(encodedResource)
+		_, _ = hasher.Write(buf)
 	}
+
 	for _, context := range versionContext {
 		if context == "" {
 			continue
 		}
-		sb.WriteByte(0)
-		sb.WriteString("version-context")
-		sb.WriteByte(0)
-		sb.WriteString(context)
+		buf = buf[:0]
+		buf = append(buf, 0)
+		buf = append(buf, "version-context"...)
+		buf = append(buf, 0)
+		buf = append(buf, context...)
+		_, _ = hasher.Write(buf)
 	}
-	return c.hash(map[string]string{typeURL: sb.String()}), nil
+
+	buf = buf[:0]
+	buf = append(buf, typeURL...)
+	_, _ = hasher.Write(buf)
+
+	return rand.SafeEncodeString(strconv.FormatUint(uint64(hasher.Sum32()), 10)), nil
 }
 
 // normalizeSnapshotResources returns the resource view used to build an ADS
@@ -579,39 +626,37 @@ func (c *cacheImpl) GenerateSnapshot(resources *xds.Resources, logger *slog.Logg
 		secrets[name] = r
 	}
 
-	resourceGroups := map[string]map[string]cache_types.Resource{
-		envoy_resource.EndpointType: endpoints,
-		envoy_resource.ClusterType:  clusters,
-		envoy_resource.RouteType:    routes,
-		envoy_resource.ListenerType: listeners,
-		envoy_resource.SecretType:   secrets,
-		NetworkPolicyTypeURL:        networkPolicies,
-		NetworkPolicyHostsTypeURL:   networkPolicyHosts,
-	}
+	versionedResources := make(map[string]cache.Resources, 7)
 
-	versionedResources := make(map[string]cache.Resources, len(resourceGroups))
-	for typeURL, resourceMap := range resourceGroups {
-		var versionContext string
-		if typeURL == envoy_resource.EndpointType {
-			// Envoy creates one EDS subscription per EDS-backed cluster. A new
-			// parent can request a dependent resource that the ADS stream has already
-			// seen at the current version, so go-control-plane may open the new watch
-			// without replaying the cached resource. Include the parent reference sets
-			// in dependent resource versions so new subscriptions receive the current
-			// resource immediately.
-			versionContext = edsClusterReferenceVersionContext(resources)
-		} else if typeURL == envoy_resource.RouteType {
-			versionContext = rdsListenerReferenceVersionContext(resources)
-		} else if typeURL == envoy_resource.SecretType {
-			versionContext = sdsReferenceVersionContext(resources)
-		} else if typeURL == envoy_resource.ClusterType {
-			versionContext = listenerClusterReferenceVersionContext(resources)
-		}
+	addResourceGroup := func(typeURL string, resourceMap map[string]cache_types.Resource, versionContext string) error {
 		version, err := c.resourceVersion(typeURL, resourceMap, versionContext)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		versionedResources[typeURL] = resourceGroup(version, resourceMap)
+		return nil
+	}
+
+	if err := addResourceGroup(envoy_resource.EndpointType, endpoints, edsClusterReferenceVersionContext(resources)); err != nil {
+		return nil, err
+	}
+	if err := addResourceGroup(envoy_resource.ClusterType, clusters, listenerClusterReferenceVersionContext(resources)); err != nil {
+		return nil, err
+	}
+	if err := addResourceGroup(envoy_resource.RouteType, routes, rdsListenerReferenceVersionContext(resources)); err != nil {
+		return nil, err
+	}
+	if err := addResourceGroup(envoy_resource.ListenerType, listeners, ""); err != nil {
+		return nil, err
+	}
+	if err := addResourceGroup(envoy_resource.SecretType, secrets, sdsReferenceVersionContext(resources)); err != nil {
+		return nil, err
+	}
+	if err := addResourceGroup(NetworkPolicyTypeURL, networkPolicies, ""); err != nil {
+		return nil, err
+	}
+	if err := addResourceGroup(NetworkPolicyHostsTypeURL, networkPolicyHosts, ""); err != nil {
+		return nil, err
 	}
 
 	return newCiliumSnapshot(versionedResources), nil
