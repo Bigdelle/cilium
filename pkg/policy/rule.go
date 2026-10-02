@@ -416,7 +416,13 @@ func (resMap *L4PolicyMap) mergeL4Filter(policyCtx PolicyContext, rule *rule) (i
 }
 
 func (pms *L4PolicyMaps) ensureTier(tier types.Tier) {
-	for len(*pms) <= int(tier) {
+	needed := int(tier) + 1
+	if needed > cap(*pms) {
+		newPms := make(L4PolicyMaps, len(*pms), needed)
+		copy(newPms, *pms)
+		*pms = newPms
+	}
+	for len(*pms) < needed {
 		*pms = append(*pms, makeL4PolicyMap())
 	}
 }

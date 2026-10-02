@@ -329,11 +329,6 @@ func (p *Repository) GetRulesList() *models.Policy {
 	}
 }
 
-// resolvePolicyLocked returns the selectorPolicy for the provided
-// identity from the set of rules in the repository.  If the policy
-// cannot be generated due to conflicts at L4 or L7, returns an error.
-//
-// Must be performed while holding the Repository lock.
 func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*selectorPolicy, error) {
 	// First obtain whether policy applies in both traffic directions, as well
 	// as list of rules which actually select this endpoint. This allows us
@@ -346,16 +341,6 @@ func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*
 
 	sc := p.GetSelectorCache()
 
-	calculatedPolicy := &selectorPolicy{
-		Revision:             p.GetRevision(),
-		clusterInfo:          p.clusterInfo,
-		SelectorCache:        sc,
-		namedPortsGetter:     p.namedPortsGetter,
-		L4Policy:             NewL4Policy(p.GetRevision()),
-		IngressPolicyEnabled: ingressEnabled,
-		EgressPolicyEnabled:  egressEnabled,
-	}
-
 	policyCtx := policyContext{
 		repo:               p,
 		ns:                 securityIdentity.LabelArray.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
@@ -365,22 +350,42 @@ func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*
 		logger:             p.logger.With(logfields.Identity, securityIdentity.ID),
 	}
 
+	var newL4IngressPolicy, newL4EgressPolicy L4DirectionPolicy
+	var err error
+
 	if ingressEnabled {
 		policyCtx.PolicyTrace("resolving ingress policy")
-		newL4IngressPolicy, err := rulesIngress.resolveL4Policy(&policyCtx)
+		newL4IngressPolicy, err = rulesIngress.resolveL4Policy(&policyCtx)
 		if err != nil {
 			return nil, err
 		}
-		calculatedPolicy.L4Policy.Ingress = newL4IngressPolicy
+	} else {
+		newL4IngressPolicy = newL4DirectionPolicy()
 	}
 
 	if egressEnabled {
 		policyCtx.PolicyTrace("resolving egress policy")
-		newL4EgressPolicy, err := rulesEgress.resolveL4Policy(&policyCtx)
+		newL4EgressPolicy, err = rulesEgress.resolveL4Policy(&policyCtx)
 		if err != nil {
 			return nil, err
 		}
-		calculatedPolicy.L4Policy.Egress = newL4EgressPolicy
+	} else {
+		newL4EgressPolicy = newL4DirectionPolicy()
+	}
+
+	calculatedPolicy := &selectorPolicy{
+		Revision:         p.GetRevision(),
+		clusterInfo:      p.clusterInfo,
+		SelectorCache:    sc,
+		namedPortsGetter: p.namedPortsGetter,
+		L4Policy: L4Policy{
+			Ingress:  newL4IngressPolicy,
+			Egress:   newL4EgressPolicy,
+			Revision: p.GetRevision(),
+			users:    make(map[*EndpointPolicy]struct{}),
+		},
+		IngressPolicyEnabled: ingressEnabled,
+		EgressPolicyEnabled:  egressEnabled,
 	}
 
 	// Make the calculated policy ready for incremental updates
