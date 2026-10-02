@@ -196,13 +196,37 @@ func (ls LabelArray) DeepCopy() LabelArray {
 	return o
 }
 
-// GetModel returns the LabelArray as a string array with fully-qualified labels.
-// The output is parseable by ParseLabelArrayFromArray
+// GetModel returns the Model representation of the labels.
 func (ls LabelArray) GetModel() []string {
-	res := make([]string, 0, len(ls))
-	for l := range ls {
-		res = append(res, ls[l].String())
+	n := len(ls)
+	if n == 0 {
+		return []string{}
 	}
+
+	totalLen := 0
+	for i := range ls {
+		totalLen += len(ls[i].Source) + 1 + len(ls[i].Key)
+		if len(ls[i].Value) > 0 {
+			totalLen += 1 + len(ls[i].Value)
+		}
+	}
+
+	var sb strings.Builder
+	sb.Grow(totalLen)
+
+	res := make([]string, n)
+	for i := range ls {
+		start := sb.Len()
+		sb.WriteString(ls[i].Source)
+		sb.WriteString(SourceDelimiter)
+		sb.WriteString(ls[i].Key)
+		if len(ls[i].Value) > 0 {
+			sb.WriteByte('=')
+			sb.WriteString(ls[i].Value)
+		}
+		res[i] = sb.String()[start:sb.Len()]
+	}
+
 	return res
 }
 
