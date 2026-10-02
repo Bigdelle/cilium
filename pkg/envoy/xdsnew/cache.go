@@ -11,7 +11,9 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/davecgh/go-spew/spew"
 	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -459,28 +461,63 @@ func sdsReferenceVersionContext(resources *xds.Resources) string {
 	return resourceReferencesVersionContext(refs)
 }
 
+var deterministicProtoOpts = proto.MarshalOptions{Deterministic: true}
+
+var protoBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 1024)
+		return &b
+	},
+}
+
 func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_types.Resource, versionContext ...string) (string, error) {
-	keys := slices.Collect(maps.Keys(resources))
+	n := len(resources)
+	var stackKeys [32]string
+	var keys []string
+	if n <= len(stackKeys) {
+		keys = stackKeys[:0]
+	} else {
+		keys = make([]string, 0, n)
+	}
+	for k := range resources {
+		keys = append(keys, k)
+	}
 	slices.Sort(keys)
-	var sb strings.Builder
+
+	bp := protoBufferPool.Get().(*[]byte)
+	buf := (*bp)[:0]
+	defer func() {
+		if cap(buf) <= 65536 {
+			*bp = buf[:0]
+			protoBufferPool.Put(bp)
+		}
+	}()
+
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(typeURL))
+
 	for _, name := range keys {
-		encodedResource, err := marshal(resources[name])
+		_, _ = hasher.Write([]byte(name))
+		res := resources[name]
+		var err error
+		buf, err = deterministicProtoOpts.MarshalAppend(buf[:0], res)
 		if err != nil {
 			return "", err
 		}
-		sb.WriteString(name)
-		sb.WriteString(encodedResource)
+		_, _ = hasher.Write(buf)
 	}
+
 	for _, context := range versionContext {
 		if context == "" {
 			continue
 		}
-		sb.WriteByte(0)
-		sb.WriteString("version-context")
-		sb.WriteByte(0)
-		sb.WriteString(context)
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write([]byte("version-context"))
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write([]byte(context))
 	}
-	return c.hash(map[string]string{typeURL: sb.String()}), nil
+
+	return rand.SafeEncodeString(strconv.FormatUint(uint64(hasher.Sum32()), 10)), nil
 }
 
 // normalizeSnapshotResources returns the resource view used to build an ADS
