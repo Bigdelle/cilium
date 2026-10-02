@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"golang.org/x/sys/unix"
 
@@ -67,16 +68,14 @@ func copyExistingState(oldDir, newDir string) error {
 		return fmt.Errorf("failed to list new endpoint state dir: %w", err)
 	}
 
-	newFilesHash := make(map[string]struct{}, len(newFiles))
-	for _, f := range newFiles {
-		newFilesHash[f] = struct{}{}
-	}
+	slices.Sort(newFiles)
 
-	var ok bool
+	oldFd := int(oldDirFile.Fd())
+	newFd := int(newDirFile.Fd())
 
 	for _, oldFile := range oldFiles {
-		if _, ok = newFilesHash[oldFile]; !ok {
-			if err := os.Link(filepath.Join(oldDir, oldFile), filepath.Join(newDir, oldFile)); err != nil {
+		if _, found := slices.BinarySearch(newFiles, oldFile); !found {
+			if err := unix.Linkat(oldFd, oldFile, newFd, oldFile, 0); err != nil {
 				return fmt.Errorf("failed to move endpoint state file: %w", err)
 			}
 		}
