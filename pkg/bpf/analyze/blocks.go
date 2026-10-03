@@ -448,6 +448,11 @@ func (i *Iterator) Backtrack() *Backtracker {
 	return newBacktracker(i.block, i.insns).Seek(i.insnIdx)
 }
 
+// Backtracker is an iterator that walks backwards through a Block's
+// instructions.
+//
+// This is useful for finding the last instruction that wrote to a register
+// before it is read, by following the control flow backwards.
 type Backtracker struct {
 	insns asm.Instructions
 
@@ -514,6 +519,9 @@ func (bt *Backtracker) Seek(index int) *Backtracker {
 	return bt
 }
 
+// previousBlock rolls over the Backtracker to the first and only predecessor of
+// the current block, if any. Returns false if there is no predecessor or if
+// there are multiple predecessors.
 func (bt *Backtracker) previousBlock() bool {
 	if len(bt.block.predecessors) != 1 {
 		return false
