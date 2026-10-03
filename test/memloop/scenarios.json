@@ -1,0 +1,106 @@
+[
+  {
+    "name": "dns",
+    "gke_workload": "dns",
+    "package": "./pkg/fqdn/namemanager",
+    "bench_regex": "^BenchmarkMemloopScenario_DNS$",
+    "hot_packages": ["pkg/fqdn/namemanager", "pkg/fqdn", "pkg/fqdn/matchpattern", "pkg/fqdn/re"],
+    "inuse": false
+  },
+  {
+    "name": "dns-inuse",
+    "gke_workload": "dns",
+    "package": "./pkg/fqdn/namemanager",
+    "bench_regex": "^BenchmarkMemloopScenario_DNS_Inuse$",
+    "hot_packages": ["pkg/fqdn/namemanager", "pkg/fqdn", "pkg/fqdn/matchpattern", "pkg/fqdn/re"],
+    "inuse": true
+  },
+  {
+    "name": "service-lb",
+    "gke_workload": "service-lb",
+    "package": "./pkg/loadbalancer/writer",
+    "bench_regex": "^BenchmarkMemloopScenario_ServiceLB$",
+    "hot_packages": ["pkg/loadbalancer/writer", "pkg/loadbalancer", "github.com/cilium/statedb"],
+    "inuse": false
+  },
+  {
+    "name": "service-lb-inuse",
+    "gke_workload": "service-lb",
+    "package": "./pkg/loadbalancer/writer",
+    "bench_regex": "^BenchmarkMemloopScenario_ServiceLB_Inuse$",
+    "hot_packages": ["pkg/loadbalancer/writer", "pkg/loadbalancer", "github.com/cilium/statedb"],
+    "inuse": true
+  },
+  {
+    "name": "cidr-policy",
+    "gke_workload": "cidr-policy",
+    "package": "./pkg/policy",
+    "bench_regex": "^BenchmarkMemloopScenario_CIDRPolicy$",
+    "hot_packages": ["pkg/policy", "pkg/policy/utils", "pkg/policy/types", "pkg/labels"],
+    "inuse": false
+  },
+  {
+    "name": "cidr-policy-inuse",
+    "gke_workload": "cidr-policy",
+    "package": "./pkg/policy",
+    "bench_regex": "^BenchmarkMemloopScenario_CIDRPolicy_Inuse$",
+    "hot_packages": ["pkg/policy", "pkg/policy/utils", "pkg/policy/types", "pkg/labels"],
+    "inuse": true
+  },
+  {
+    "name": "cidr-policy-ipcache",
+    "gke_workload": "cidr-policy",
+    "package": "./pkg/ipcache",
+    "bench_regex": "^BenchmarkMemloopScenario_CIDRPolicy_IPCache$",
+    "hot_packages": ["pkg/ipcache", "pkg/labels", "pkg/container/bitlpm", "pkg/counter"],
+    "inuse": false
+  },
+  {
+    "name": "cidr-policy-ipcache-inuse",
+    "gke_workload": "cidr-policy",
+    "package": "./pkg/ipcache",
+    "bench_regex": "^BenchmarkMemloopScenario_CIDRPolicy_IPCache_Inuse$",
+    "hot_packages": ["pkg/ipcache", "pkg/labels", "pkg/container/bitlpm", "pkg/counter"],
+    "inuse": true
+  },
+  {
+    "name": "k8s-crd",
+    "gke_workload": "k8s-crd",
+    "package": "./pkg/k8s",
+    "bench_regex": "^BenchmarkMemloopScenario_K8sCRD$",
+    "hot_packages": ["pkg/k8s", "pkg/k8s/apis/cilium.io/v2", "pkg/k8s/apis/cilium.io/utils", "pkg/labels", "pkg/labelsfilter"],
+    "inuse": false
+  },
+  {
+    "name": "k8s-crd-inuse",
+    "gke_workload": "k8s-crd",
+    "package": "./pkg/k8s",
+    "bench_regex": "^BenchmarkMemloopScenario_K8sCRD_Inuse$",
+    "hot_packages": ["pkg/k8s", "pkg/k8s/apis/cilium.io/v2", "pkg/k8s/apis/cilium.io/utils", "pkg/labels", "pkg/labelsfilter"],
+    "inuse": true
+  },
+  {
+    "name": "endpoint-scale",
+    "gke_workload": "endpoint-scale",
+    "package": "./pkg/policy",
+    "bench_regex": "^BenchmarkMemloopScenario_EndpointScale$",
+    "hot_packages": ["pkg/policy", "pkg/policy/types"],
+    "inuse": false
+  },
+  {
+    "name": "identity-churn",
+    "gke_workload": "identity-churn",
+    "package": "./pkg/identity/cache",
+    "bench_regex": "^BenchmarkMemloopScenario_IdentityChurn$",
+    "hot_packages": ["pkg/identity/cache", "pkg/allocator", "pkg/k8s/identitybackend", "pkg/policy"],
+    "inuse": false
+  },
+  {
+    "name": "identity-churn-inuse",
+    "gke_workload": "identity-churn",
+    "package": "./pkg/identity/cache",
+    "bench_regex": "^BenchmarkMemloopScenario_IdentityChurn_Inuse$",
+    "hot_packages": ["pkg/identity/cache", "pkg/allocator", "pkg/k8s/identitybackend", "pkg/policy"],
+    "inuse": true
+  }
+]
