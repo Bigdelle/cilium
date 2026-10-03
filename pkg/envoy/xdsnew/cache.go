@@ -11,9 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/davecgh/go-spew/spew"
 	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -461,15 +459,6 @@ func sdsReferenceVersionContext(resources *xds.Resources) string {
 	return resourceReferencesVersionContext(refs)
 }
 
-var deterministicProtoOpts = proto.MarshalOptions{Deterministic: true}
-
-var protoBufferPool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 0, 1024)
-		return &b
-	},
-}
-
 func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_types.Resource, versionContext ...string) (string, error) {
 	n := len(resources)
 	var stackKeys [32]string
@@ -484,40 +473,27 @@ func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_t
 	}
 	slices.Sort(keys)
 
-	bp := protoBufferPool.Get().(*[]byte)
-	buf := (*bp)[:0]
-	defer func() {
-		if cap(buf) <= 65536 {
-			*bp = buf[:0]
-			protoBufferPool.Put(bp)
-		}
-	}()
-
-	hasher := fnv.New32a()
-	_, _ = hasher.Write([]byte(typeURL))
-
+	// Every item is length-delimited (see versionHasher), so resource names,
+	// payloads and version contexts cannot run into each other.
+	vh := newVersionHasher()
+	vh.string(typeURL)
+	vh.uvarint(uint64(len(keys)))
 	for _, name := range keys {
-		_, _ = hasher.Write([]byte(name))
-		res := resources[name]
-		var err error
-		buf, err = deterministicProtoOpts.MarshalAppend(buf[:0], res)
-		if err != nil {
+		vh.string(name)
+		if err := vh.resource(resources[name]); err != nil {
 			return "", err
 		}
-		_, _ = hasher.Write(buf)
 	}
 
 	for _, context := range versionContext {
 		if context == "" {
 			continue
 		}
-		_, _ = hasher.Write([]byte{0})
-		_, _ = hasher.Write([]byte("version-context"))
-		_, _ = hasher.Write([]byte{0})
-		_, _ = hasher.Write([]byte(context))
+		vh.string("version-context")
+		vh.string(context)
 	}
 
-	return rand.SafeEncodeString(strconv.FormatUint(uint64(hasher.Sum32()), 10)), nil
+	return vh.version(), nil
 }
 
 // normalizeSnapshotResources returns the resource view used to build an ADS

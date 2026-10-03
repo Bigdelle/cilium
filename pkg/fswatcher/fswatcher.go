@@ -112,6 +112,8 @@ func WithInterval(d time.Duration) Option {
 	}
 }
 
+// New creates a new Watcher which watches all trackedFile paths (they do not
+// need to exist yet).
 func New(defaultLogger *slog.Logger, trackedFiles []string, options ...Option) (*Watcher, error) {
 	interval := defaultInterval
 	if testing.Testing() {
@@ -190,6 +192,9 @@ var (
 )
 
 func (w *Watcher) tick() {
+	// get all the paths that are currently known and are being tracked and visit
+	// them in order. It's done this way because the `w.tracked` map can be
+	// modified as new directories are discovered.
 	orderPtr := orderPool.Get().(*[]string)
 	order := (*orderPtr)[:0]
 	defer func() {
@@ -210,7 +215,7 @@ func (w *Watcher) tick() {
 	h := hashPool.Get().(hash.Hash64)
 	defer hashPool.Put(h)
 
-	idx := -1
+	idx := -1 // start out of bounds because idx++ is done at the start of the loop
 	for {
 		idx++
 		if idx >= len(order) || idx < 0 {
@@ -220,6 +225,7 @@ func (w *Watcher) tick() {
 		path := order[idx]
 		oldState, ok := w.tracked[path]
 		if !ok {
+			// not sure how this can be possible, but better safe than sorry
 			continue
 		}
 
@@ -228,25 +234,35 @@ func (w *Watcher) tick() {
 			newState = state{}
 		)
 
+		// os.Stat follows symlinks, os.Lstat doesn't
 		info, err := os.Stat(path)
 		newState.info = info
 
 		if os.IsNotExist(err) {
+			// if the path does not exist, check if it existed before because if it
+			// did -- issue a deletion event
 			if oldState.info != nil {
+				// this file was deleted
 				w.sendEvent(Event{
 					Name: path,
 					Op:   Remove,
 				})
+
+				// clear out old state from the map
 				w.tracked[path] = newState
 			}
+
 			continue
 		}
 
+		// some other type of error encountered while doing os.Stat
 		if err != nil {
 			w.sendError(err)
 			continue
 		}
 
+		// when encountering a directory as a tracked path, list it's contents and
+		// track those, including a recursion into subdirectories.
 		if info.IsDir() {
 			de, err := os.ReadDir(path)
 			if err != nil {
@@ -256,15 +272,21 @@ func (w *Watcher) tick() {
 			for _, f := range de {
 				fp := filepath.Join(path, f.Name())
 				if _, ok := w.tracked[fp]; ok {
+					// this file is already being tracked, skip it
 					continue
 				}
 
+				// "schedule" this file to be checked at the end the order
 				order = append(order, fp)
 				w.tracked[fp] = state{}
 			}
+
+			// nothing else needs to be done for directory handling
 			continue
 		}
 
+		// compute the checksum of the file/symlink which is subsequently used to
+		// issue Write notifications
 		file, err := os.Open(path)
 		if err != nil {
 			w.sendError(err)
@@ -293,15 +315,21 @@ func (w *Watcher) tick() {
 		newState.sum64 = h.Sum64()
 
 		if oldState.info == nil {
+			// haven't seen info for this track path before -- issue a creation
 			op := Create
+
+			// issue Create&Write if the file has data
 			if info.Size() > 0 {
 				op |= Write
 			}
+
+			// this is a new file
 			w.sendEvent(Event{
 				Name: path,
 				Op:   op,
 			})
 		} else {
+			// have seen this file/symlink before -- lets see if it changed size or contents
 			if info.Size() != oldInfo.Size() || newState.sum64 != oldState.sum64 {
 				w.sendEvent(Event{
 					Name: path,
