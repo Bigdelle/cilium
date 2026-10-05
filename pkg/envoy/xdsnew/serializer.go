@@ -47,10 +47,17 @@ var bufPool = sync.Pool{
 
 // marshalTo serializes an Envoy resource to stable JSON directly into a strings.Builder,
 // bypassing intermediate string allocations and deep copy reflection overhead.
-func marshalTo(sb *strings.Builder, res Resource) error {
+func marshalTo(w interface{ Write([]byte) (int, error) }, res Resource) error {
 	opts := protojson.MarshalOptions{UseProtoNames: true, Indent: ""}
-	data, err := opts.Marshal(res)
+
+	bPtr := protoBytesPool.Get().(*[]byte)
+	b := (*bPtr)[:0]
+
+	data, err := opts.MarshalAppend(b, res)
 	if err != nil {
+		if cap(b) <= 4096 {
+			protoBytesPool.Put(bPtr)
+		}
 		return err
 	}
 
@@ -59,6 +66,10 @@ func marshalTo(sb *strings.Builder, res Resource) error {
 
 	// json.Compact safely strips protojson's randomized whitespace natively.
 	if err := json.Compact(buf, data); err != nil {
+		if cap(data) <= 4096 {
+			*bPtr = data
+			protoBytesPool.Put(bPtr)
+		}
 		if buf.Cap() <= 4096 {
 			bufPool.Put(buf)
 		}
@@ -72,8 +83,12 @@ func marshalTo(sb *strings.Builder, res Resource) error {
 	// to guarantee byte-for-byte stability for version hashing.
 	json.HTMLEscape(buf2, buf.Bytes())
 
-	sb.Write(buf2.Bytes())
+	w.Write(buf2.Bytes())
 
+	if cap(data) <= 4096 {
+		*bPtr = data
+		protoBytesPool.Put(bPtr)
+	}
 	if buf.Cap() <= 4096 {
 		bufPool.Put(buf)
 	}
@@ -305,4 +320,11 @@ func unmarshal(data []byte, res Resource) error {
 		return fmt.Errorf("error deserializing resource: %w", err)
 	}
 	return nil
+}
+
+var protoBytesPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 4096)
+		return &b
+	},
 }

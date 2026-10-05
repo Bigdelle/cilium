@@ -11,7 +11,9 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/davecgh/go-spew/spew"
 	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -459,26 +461,84 @@ func sdsReferenceVersionContext(resources *xds.Resources) string {
 	return resourceReferencesVersionContext(refs)
 }
 
+var keysPool = sync.Pool{
+	New: func() any {
+		s := make([]string, 0, 128)
+		return &s
+	},
+}
+
+type versionHasher struct {
+	h hash.Hash32
+	b []byte
+}
+
+func (vh *versionHasher) WriteString(s string) (int, error) {
+	vh.b = append(vh.b[:0], s...)
+	return vh.h.Write(vh.b)
+}
+
+func (vh *versionHasher) Write(p []byte) (int, error) {
+	return vh.h.Write(p)
+}
+
+var vhPool = sync.Pool{
+	New: func() any {
+		return &versionHasher{
+			h: fnv.New32a(),
+			b: make([]byte, 0, 128),
+		}
+	},
+}
+
 func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_types.Resource, versionContext ...string) (string, error) {
-	keys := slices.Collect(maps.Keys(resources))
+	keysPtr := keysPool.Get().(*[]string)
+	keys := (*keysPtr)[:0]
+	for k := range resources {
+		keys = append(keys, k)
+	}
 	slices.Sort(keys)
-	var sb strings.Builder
+
+	vh := vhPool.Get().(*versionHasher)
+	vh.h.Reset()
+
+	vh.WriteString(typeURL)
+	vh.WriteString("\x00")
+
 	for _, name := range keys {
-		sb.WriteString(name)
-		if err := marshalTo(&sb, resources[name]); err != nil {
+		vh.WriteString(name)
+		vh.WriteString("\x00")
+		if err := marshalTo(vh, resources[name]); err != nil {
+			if cap(keys) <= 512 {
+				*keysPtr = keys
+				keysPool.Put(keysPtr)
+			}
+			if cap(vh.b) <= 4096 {
+				vhPool.Put(vh)
+			}
 			return "", err
 		}
 	}
+
 	for _, context := range versionContext {
 		if context == "" {
 			continue
 		}
-		sb.WriteByte(0)
-		sb.WriteString("version-context")
-		sb.WriteByte(0)
-		sb.WriteString(context)
+		vh.WriteString("\x00version-context\x00")
+		vh.WriteString(context)
 	}
-	return c.hash(map[string]string{typeURL: sb.String()}), nil
+
+	sum := vh.h.Sum32()
+
+	if cap(keys) <= 512 {
+		*keysPtr = keys
+		keysPool.Put(keysPtr)
+	}
+	if cap(vh.b) <= 4096 {
+		vhPool.Put(vh)
+	}
+
+	return rand.SafeEncodeString(strconv.FormatUint(uint64(sum), 10)), nil
 }
 
 // normalizeSnapshotResources returns the resource view used to build an ADS
