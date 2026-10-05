@@ -4,6 +4,7 @@
 package fswatcher
 
 import (
+	"hash"
 	"hash/fnv"
 	"io"
 	"log/slog"
@@ -85,6 +86,7 @@ type Watcher struct {
 	Errors chan error
 
 	tracked map[string]state // tracking state
+	order   []string         // reused scratch slice for traversal
 	silent  atomic.Bool      // track updates but do not send notifications
 
 	// control the interval at which the watcher checks for changes
@@ -171,11 +173,24 @@ func (w *Watcher) loop() {
 	}
 }
 
+var fswBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 4096)
+		return &b
+	},
+}
+
+var fswHashPool = sync.Pool{
+	New: func() any {
+		return fnv.New64a()
+	},
+}
+
 func (w *Watcher) tick() {
 	// get all the paths that are currently known and are being tracked and visit
 	// them in order. It's done this way because the `w.tracked` map can be
 	// modified as new directories are discovered.
-	var order []string
+	order := w.order[:0]
 	for path := range w.tracked {
 		order = append(order, path)
 	}
@@ -258,14 +273,33 @@ func (w *Watcher) tick() {
 			continue
 		}
 
-		h := fnv.New64()
-		_, err = io.Copy(h, file)
+		h := fswHashPool.Get().(hash.Hash64)
+		h.Reset()
+		bufPtr := fswBufPool.Get().(*[]byte)
+		buf := *bufPtr
+		var readErr error
+		for {
+			n, rerr := file.Read(buf)
+			if n > 0 {
+				_, _ = h.Write(buf[:n])
+			}
+			if rerr != nil {
+				if rerr != io.EOF {
+					readErr = rerr
+				}
+				break
+			}
+		}
+		fswBufPool.Put(bufPtr)
 		_ = file.Close()
-		if err != nil {
-			w.sendError(err)
+
+		if readErr != nil {
+			fswHashPool.Put(h)
+			w.sendError(readErr)
 			continue
 		}
 		newState.sum64 = h.Sum64()
+		fswHashPool.Put(h)
 
 		if oldState.info == nil {
 			// haven't seen info for this track path before -- issue a creation
@@ -292,6 +326,8 @@ func (w *Watcher) tick() {
 		}
 		w.tracked[oldState.path] = newState
 	}
+
+	w.order = order
 }
 
 func (w *Watcher) sendEvent(e Event) {
