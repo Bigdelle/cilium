@@ -464,12 +464,10 @@ func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_t
 	slices.Sort(keys)
 	var sb strings.Builder
 	for _, name := range keys {
-		encodedResource, err := marshal(resources[name])
-		if err != nil {
+		sb.WriteString(name)
+		if err := marshalTo(&sb, resources[name]); err != nil {
 			return "", err
 		}
-		sb.WriteString(name)
-		sb.WriteString(encodedResource)
 	}
 	for _, context := range versionContext {
 		if context == "" {

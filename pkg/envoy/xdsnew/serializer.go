@@ -4,10 +4,13 @@
 package xdsnew
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
+	"sync"
 
 	cilium "github.com/cilium/proxy/go/cilium/api"
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -26,21 +29,58 @@ type Resource interface {
 	proto.Message
 }
 
+// marshal serializes an Envoy resource to a stable JSON string.
 func marshal(res Resource) (string, error) {
+	var sb strings.Builder
+	if err := marshalTo(&sb, res); err != nil {
+		return "", err
+	}
+	return sb.String(), nil
+}
+
+// bufPool provides reusable bytes.Buffer instances for zero-allocation JSON compaction and escaping.
+var bufPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
+
+// marshalTo serializes an Envoy resource to stable JSON directly into a strings.Builder,
+// bypassing intermediate string allocations and deep copy reflection overhead.
+func marshalTo(sb *strings.Builder, res Resource) error {
 	opts := protojson.MarshalOptions{UseProtoNames: true, Indent: ""}
 	data, err := opts.Marshal(res)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	// Since protojson.Marshal does not produce stable output,
-	// this is a workaround to produce stable json output.
-	// See https://github.com/golang/protobuf/issues/1082
-	data2, err := json.Marshal(json.RawMessage(data))
-	if err != nil {
-		return "", err
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+
+	// json.Compact safely strips protojson's randomized whitespace natively.
+	if err := json.Compact(buf, data); err != nil {
+		if buf.Cap() <= 4096 {
+			bufPool.Put(buf)
+		}
+		return err
 	}
-	return string(data2), nil
+
+	buf2 := bufPool.Get().(*bytes.Buffer)
+	buf2.Reset()
+
+	// json.HTMLEscape strictly replicates the HTML-escaping behavior of json.Marshal
+	// to guarantee byte-for-byte stability for version hashing.
+	json.HTMLEscape(buf2, buf.Bytes())
+
+	sb.Write(buf2.Bytes())
+
+	if buf.Cap() <= 4096 {
+		bufPool.Put(buf)
+	}
+	if buf2.Cap() <= 4096 {
+		bufPool.Put(buf2)
+	}
+	return nil
 }
 
 type serializedResource struct {
@@ -61,70 +101,74 @@ func Marshal(resources *xds.Resources) (map[string]string, error) {
 
 	// marshalSorted serializes all resources of a given type in sorted key order
 	// to produce a deterministic, complete encoding for versioning.
-	marshalSorted := func(typeURL string, keys []string, marshalByKey func(key string) (string, error)) error {
+	marshalSorted := func(typeURL string, keys []string, getResource func(key string) Resource) error {
 		if len(keys) == 0 {
 			return nil
 		}
 
 		slices.SortFunc(keys, cmp.Compare)
-		serializedResources := make([]serializedResource, 0, len(keys))
-		for _, k := range keys {
-			marshaledResource, err := marshalByKey(k)
-			if err != nil {
+		var sb strings.Builder
+		sb.WriteByte('[')
+		for i, k := range keys {
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString(`{"name":`)
+
+			// json.Marshal securely quotes and escapes the string key.
+			enc, _ := json.Marshal(k)
+			sb.Write(enc)
+
+			sb.WriteString(`,"resource":`)
+			if err := marshalTo(&sb, getResource(k)); err != nil {
 				return err
 			}
-			serializedResources = append(serializedResources, serializedResource{
-				Name:     k,
-				Resource: json.RawMessage(marshaledResource),
-			})
+			sb.WriteByte('}')
 		}
+		sb.WriteByte(']')
 
-		data, err := json.Marshal(serializedResources)
-		if err != nil {
-			return err
-		}
-		encodedResources[typeURL] = string(data)
+		encodedResources[typeURL] = sb.String()
 		return nil
 	}
 
-	if err := marshalSorted(envoy_resource.EndpointType, resourceKeys(resources.Endpoints), func(k string) (string, error) {
-		return marshal(resources.Endpoints[k])
+	if err := marshalSorted(envoy_resource.EndpointType, resourceKeys(resources.Endpoints), func(k string) Resource {
+		return resources.Endpoints[k]
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(envoy_resource.ClusterType, resourceKeys(resources.Clusters), func(k string) (string, error) {
-		return marshal(resources.Clusters[k])
+	if err := marshalSorted(envoy_resource.ClusterType, resourceKeys(resources.Clusters), func(k string) Resource {
+		return resources.Clusters[k]
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(envoy_resource.RouteType, resourceKeys(resources.Routes), func(k string) (string, error) {
-		return marshal(resources.Routes[k])
+	if err := marshalSorted(envoy_resource.RouteType, resourceKeys(resources.Routes), func(k string) Resource {
+		return resources.Routes[k]
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(envoy_resource.ListenerType, resourceKeys(resources.Listeners), func(k string) (string, error) {
-		return marshal(resources.Listeners[k])
+	if err := marshalSorted(envoy_resource.ListenerType, resourceKeys(resources.Listeners), func(k string) Resource {
+		return resources.Listeners[k]
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(envoy_resource.SecretType, resourceKeys(resources.Secrets), func(k string) (string, error) {
-		return marshal(resources.Secrets[k])
+	if err := marshalSorted(envoy_resource.SecretType, resourceKeys(resources.Secrets), func(k string) Resource {
+		return resources.Secrets[k]
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(NetworkPolicyTypeURL, resourceKeys(resources.NetworkPolicies), func(k string) (string, error) {
-		return marshal(resources.NetworkPolicies[k])
+	if err := marshalSorted(NetworkPolicyTypeURL, resourceKeys(resources.NetworkPolicies), func(k string) Resource {
+		return resources.NetworkPolicies[k]
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(NetworkPolicyHostsTypeURL, resourceKeys(resources.NetworkPolicyHosts), func(k string) (string, error) {
-		return marshal(resources.NetworkPolicyHosts[k])
+	if err := marshalSorted(NetworkPolicyHostsTypeURL, resourceKeys(resources.NetworkPolicyHosts), func(k string) Resource {
+		return resources.NetworkPolicyHosts[k]
 	}); err != nil {
 		return nil, err
 	}
