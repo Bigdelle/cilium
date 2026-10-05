@@ -416,8 +416,15 @@ func (resMap *L4PolicyMap) mergeL4Filter(policyCtx PolicyContext, rule *rule) (i
 }
 
 func (pms *L4PolicyMaps) ensureTier(tier types.Tier) {
-	for len(*pms) <= int(tier) {
+	needed := int(tier) + 1
+	if len(*pms) < needed {
+		// Append empty/uninitialized structs for skipped intermediate tiers
+		for len(*pms) < int(tier) {
+			*pms = append(*pms, L4PolicyMap{})
+		}
 		*pms = append(*pms, makeL4PolicyMap())
+	} else if (*pms)[tier].NamedPortMap == nil && (*pms)[tier].RangePortMap == nil {
+		(*pms)[tier] = makeL4PolicyMap()
 	}
 }
 

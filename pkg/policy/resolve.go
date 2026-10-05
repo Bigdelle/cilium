@@ -68,22 +68,15 @@ type PolicyContext interface {
 }
 
 type policyContext struct {
-	repo *Repository
-	ns   string
-
-	// Policy tier, 0 is the default and highest tier.
-	tier types.Tier
-
-	// priority level for the rule being processed, 0 is the highest priority.
-	priority types.Priority
-
+	repo               *Repository
+	logger             *slog.Logger
+	ns                 string
+	origin             ruleOrigin
+	priority           types.Priority
+	tier               types.Tier
 	defaultDenyIngress bool
 	defaultDenyEgress  bool
-
-	origin ruleOrigin
-
-	logger       *slog.Logger
-	traceEnabled bool
+	traceEnabled       bool
 }
 
 var _ PolicyContext = &policyContext{}

@@ -47,7 +47,7 @@ var perTierRoundUp = 10
 func (rules ruleSlice) computeTierPriorities() ([]types.Priority, []int, error) {
 	nTiers := int(rules[len(rules)-1].Tier) + 1
 	tierPriorityLevels := make([]int, nTiers)
-	numPassVerdicts := make([]int, nTiers)
+	var numPassVerdicts []int
 
 	lastPrio := rules[0].Priority
 	levels := 1 // each tier with any rules occupies at least one priority level
@@ -81,6 +81,9 @@ func (rules ruleSlice) computeTierPriorities() ([]types.Priority, []int, error) 
 
 		// count the number of pass verdicts on different priorities on each tier
 		if r.Verdict == types.Pass && levels != lastPassLevel {
+			if numPassVerdicts == nil {
+				numPassVerdicts = make([]int, nTiers)
+			}
 			numPassVerdicts[lastTier]++
 			lastPassLevel = levels
 		}
@@ -92,7 +95,11 @@ func (rules ruleSlice) computeTierPriorities() ([]types.Priority, []int, error) 
 	// for each pass verdict so that when computing mapstate we can elevate priority of each
 	// passed-to entry to the priorities following the pass verdict.
 	for tier := int(lastTier) - 1; tier >= 0; tier-- {
-		tierPriorityLevels[tier] += (numPassVerdicts[tier] + 1) * tierPriorityLevels[tier+1]
+		passCount := 0
+		if numPassVerdicts != nil {
+			passCount = numPassVerdicts[tier]
+		}
+		tierPriorityLevels[tier] += (passCount + 1) * tierPriorityLevels[tier+1]
 		tierPriorityLevels[tier] = types.Roundup(tierPriorityLevels[tier], perTierRoundUp)
 	}
 
@@ -109,7 +116,8 @@ func (rules ruleSlice) computeTierPriorities() ([]types.Priority, []int, error) 
 
 	// transform tierPriority levels to the number of priority levels needed after each pass
 	// verdict on any given tier by shifting up by one.
-	tierPriorityLevels = append(tierPriorityLevels[1:], 0)
+	copy(tierPriorityLevels, tierPriorityLevels[1:])
+	tierPriorityLevels[nTiers-1] = 0
 	return tierBasePriorities, tierPriorityLevels, nil
 }
 
