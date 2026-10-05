@@ -7,12 +7,9 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"slices"
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
-
-	"github.com/cilium/cilium/pkg/metrics/metric/collections"
 )
 
 var invalidMetricValueDetectionEnabled = false
@@ -40,16 +37,23 @@ type metric struct {
 // forEachLabelVector performs a product of all possible label value combinations
 // and calls the provided function for each combination.
 func (b *metric) forEachLabelVector(fn func(lvls []string)) {
-	if b.labels == nil {
+	if b.labels == nil || len(b.labels.lbls) == 0 {
 		return
 	}
-	var labelValues [][]string
-	for _, label := range b.labels.lbls {
-		labelValues = append(labelValues, slices.Collect(maps.Keys(label.Values)))
+
+	current := make([]string, len(b.labels.lbls))
+	var generate func(depth int)
+	generate = func(depth int) {
+		if depth == len(b.labels.lbls) {
+			fn(current)
+			return
+		}
+		for val := range b.labels.lbls[depth].Values {
+			current[depth] = val
+			generate(depth + 1)
+		}
 	}
-	for _, labelVector := range collections.CartesianProduct(labelValues...) {
-		fn(labelVector)
-	}
+	generate(0)
 }
 
 // checkLabelValues checks that the provided label values are within the range
