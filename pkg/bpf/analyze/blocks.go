@@ -456,8 +456,8 @@ func (i *Iterator) Backtrack() *Backtracker {
 type Backtracker struct {
 	insns asm.Instructions
 
-	block   *Block
-	visited []*Block
+	block      *Block
+	startBlock *Block
 
 	index int
 	ins   *asm.Instruction
@@ -540,15 +540,20 @@ func (bt *Backtracker) previousBlock() bool {
 		// Never roll over to self.
 		return false
 	}
-	if len(bt.visited) == 0 {
-		// First rollover, initialize visited list in a single allocation.
-		bt.visited = []*Block{bt.block, pred}
+
+	if bt.startBlock == nil {
+		bt.startBlock = bt.block
 	} else {
-		// Subsequent rollovers, check visited list and append if needed.
-		if slices.Contains(bt.visited, pred) {
-			return false
+		// Dynamic exact history reconstruction to detect cycles without allocating a visited slice.
+		// Since the backward traversal path is strictly out-degree 1 and the graph is immutable,
+		// the sequence of visited blocks is uniquely determined by walking from startBlock to bt.block.
+		curr := bt.startBlock
+		for curr != bt.block {
+			if curr == pred {
+				return false
+			}
+			curr = curr.predecessors[0]
 		}
-		bt.visited = append(bt.visited, pred)
 	}
 
 	bt.block = pred
@@ -560,10 +565,13 @@ func (bt *Backtracker) previousBlock() bool {
 
 // Clone creates a copy of the Backtracker at its current position.
 func (bt *Backtracker) Clone() *Backtracker {
-	cpy := *bt
-	cpy.visited = slices.Clone(cpy.visited)
-
-	return &cpy
+	return &Backtracker{
+		insns:      bt.insns,
+		block:      bt.block,
+		startBlock: bt.startBlock,
+		index:      bt.index,
+		ins:        bt.ins,
+	}
 }
 
 // getBlock retrieves the block associated with an instruction. It checks both
