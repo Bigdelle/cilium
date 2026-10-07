@@ -16,7 +16,6 @@ import (
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	secret "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	envoy_resource "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/cilium/cilium/pkg/envoy/xds"
@@ -26,26 +25,18 @@ type Resource interface {
 	proto.Message
 }
 
-func marshal(res Resource) (string, error) {
-	opts := protojson.MarshalOptions{UseProtoNames: true, Indent: ""}
-	data, err := opts.Marshal(res)
-	if err != nil {
-		return "", err
-	}
+func marshalAppend(buf []byte, res Resource) ([]byte, error) {
+	opts := proto.MarshalOptions{Deterministic: true}
+	return opts.MarshalAppend(buf, res)
+}
 
-	// Since protojson.Marshal does not produce stable output,
-	// this is a workaround to produce stable json output.
-	// See https://github.com/golang/protobuf/issues/1082
-	data2, err := json.Marshal(json.RawMessage(data))
-	if err != nil {
-		return "", err
-	}
-	return string(data2), nil
+func marshal(res Resource) ([]byte, error) {
+	return marshalAppend(nil, res)
 }
 
 type serializedResource struct {
-	Name     string          `json:"name"`
-	Resource json.RawMessage `json:"resource"`
+	Name     string `json:"name"`
+	Resource []byte `json:"resource"`
 }
 
 func resourceKeys[T any](resources map[string]T) []string {
@@ -61,7 +52,7 @@ func Marshal(resources *xds.Resources) (map[string]string, error) {
 
 	// marshalSorted serializes all resources of a given type in sorted key order
 	// to produce a deterministic, complete encoding for versioning.
-	marshalSorted := func(typeURL string, keys []string, marshalByKey func(key string) (string, error)) error {
+	marshalSorted := func(typeURL string, keys []string, marshalByKey func(key string) ([]byte, error)) error {
 		if len(keys) == 0 {
 			return nil
 		}
@@ -75,7 +66,7 @@ func Marshal(resources *xds.Resources) (map[string]string, error) {
 			}
 			serializedResources = append(serializedResources, serializedResource{
 				Name:     k,
-				Resource: json.RawMessage(marshaledResource),
+				Resource: marshaledResource,
 			})
 		}
 
@@ -87,43 +78,43 @@ func Marshal(resources *xds.Resources) (map[string]string, error) {
 		return nil
 	}
 
-	if err := marshalSorted(envoy_resource.EndpointType, resourceKeys(resources.Endpoints), func(k string) (string, error) {
+	if err := marshalSorted(envoy_resource.EndpointType, resourceKeys(resources.Endpoints), func(k string) ([]byte, error) {
 		return marshal(resources.Endpoints[k])
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(envoy_resource.ClusterType, resourceKeys(resources.Clusters), func(k string) (string, error) {
+	if err := marshalSorted(envoy_resource.ClusterType, resourceKeys(resources.Clusters), func(k string) ([]byte, error) {
 		return marshal(resources.Clusters[k])
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(envoy_resource.RouteType, resourceKeys(resources.Routes), func(k string) (string, error) {
+	if err := marshalSorted(envoy_resource.RouteType, resourceKeys(resources.Routes), func(k string) ([]byte, error) {
 		return marshal(resources.Routes[k])
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(envoy_resource.ListenerType, resourceKeys(resources.Listeners), func(k string) (string, error) {
+	if err := marshalSorted(envoy_resource.ListenerType, resourceKeys(resources.Listeners), func(k string) ([]byte, error) {
 		return marshal(resources.Listeners[k])
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(envoy_resource.SecretType, resourceKeys(resources.Secrets), func(k string) (string, error) {
+	if err := marshalSorted(envoy_resource.SecretType, resourceKeys(resources.Secrets), func(k string) ([]byte, error) {
 		return marshal(resources.Secrets[k])
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(NetworkPolicyTypeURL, resourceKeys(resources.NetworkPolicies), func(k string) (string, error) {
+	if err := marshalSorted(NetworkPolicyTypeURL, resourceKeys(resources.NetworkPolicies), func(k string) ([]byte, error) {
 		return marshal(resources.NetworkPolicies[k])
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := marshalSorted(NetworkPolicyHostsTypeURL, resourceKeys(resources.NetworkPolicyHosts), func(k string) (string, error) {
+	if err := marshalSorted(NetworkPolicyHostsTypeURL, resourceKeys(resources.NetworkPolicyHosts), func(k string) ([]byte, error) {
 		return marshal(resources.NetworkPolicyHosts[k])
 	}); err != nil {
 		return nil, err
@@ -146,7 +137,7 @@ func Unmarshal(encodedResources map[string]string) (xds.Resources, error) {
 	for resourceType, resourceList := range encodedResources {
 		switch resourceType {
 		case envoy_resource.EndpointType:
-			err := unmarshalEach(resourceList, func(name string, resource json.RawMessage) error {
+			err := unmarshalEach(resourceList, func(name string, resource []byte) error {
 				unmarshalledEndpoint := &endpoint.ClusterLoadAssignment{}
 				if err := unmarshal(resource, unmarshalledEndpoint); err != nil {
 					return err
@@ -158,7 +149,7 @@ func Unmarshal(encodedResources map[string]string) (xds.Resources, error) {
 				return xds.Resources{}, err
 			}
 		case envoy_resource.ClusterType:
-			err := unmarshalEach(resourceList, func(name string, resource json.RawMessage) error {
+			err := unmarshalEach(resourceList, func(name string, resource []byte) error {
 				unmarshalledCluster := &cluster.Cluster{}
 				if err := unmarshal(resource, unmarshalledCluster); err != nil {
 					return err
@@ -170,7 +161,7 @@ func Unmarshal(encodedResources map[string]string) (xds.Resources, error) {
 				return xds.Resources{}, err
 			}
 		case envoy_resource.RouteType:
-			err := unmarshalEach(resourceList, func(name string, resource json.RawMessage) error {
+			err := unmarshalEach(resourceList, func(name string, resource []byte) error {
 				unmarshalledRoute := &route.RouteConfiguration{}
 				if err := unmarshal(resource, unmarshalledRoute); err != nil {
 					return err
@@ -182,7 +173,7 @@ func Unmarshal(encodedResources map[string]string) (xds.Resources, error) {
 				return xds.Resources{}, err
 			}
 		case envoy_resource.ListenerType:
-			err := unmarshalEach(resourceList, func(name string, resource json.RawMessage) error {
+			err := unmarshalEach(resourceList, func(name string, resource []byte) error {
 				unmarshalledListener := &listener.Listener{}
 				if err := unmarshal(resource, unmarshalledListener); err != nil {
 					return err
@@ -194,7 +185,7 @@ func Unmarshal(encodedResources map[string]string) (xds.Resources, error) {
 				return xds.Resources{}, err
 			}
 		case envoy_resource.SecretType:
-			err := unmarshalEach(resourceList, func(name string, resource json.RawMessage) error {
+			err := unmarshalEach(resourceList, func(name string, resource []byte) error {
 				unmarshalledSecret := &secret.Secret{}
 				if err := unmarshal(resource, unmarshalledSecret); err != nil {
 					return err
@@ -206,7 +197,7 @@ func Unmarshal(encodedResources map[string]string) (xds.Resources, error) {
 				return xds.Resources{}, err
 			}
 		case NetworkPolicyTypeURL:
-			err := unmarshalEach(resourceList, func(name string, resource json.RawMessage) error {
+			err := unmarshalEach(resourceList, func(name string, resource []byte) error {
 				unmarshalledNetworkPolicy := &cilium.NetworkPolicy{}
 				if err := unmarshal(resource, unmarshalledNetworkPolicy); err != nil {
 					return err
@@ -218,7 +209,7 @@ func Unmarshal(encodedResources map[string]string) (xds.Resources, error) {
 				return xds.Resources{}, err
 			}
 		case NetworkPolicyHostsTypeURL:
-			err := unmarshalEach(resourceList, func(name string, resource json.RawMessage) error {
+			err := unmarshalEach(resourceList, func(name string, resource []byte) error {
 				unmarshalledNetworkPolicyHosts := &cilium.NetworkPolicyHosts{}
 				if err := unmarshal(resource, unmarshalledNetworkPolicyHosts); err != nil {
 					return err
@@ -234,7 +225,7 @@ func Unmarshal(encodedResources map[string]string) (xds.Resources, error) {
 	return resources, nil
 }
 
-func unmarshalEach(str string, decode func(name string, resource json.RawMessage) error) error {
+func unmarshalEach(str string, decode func(name string, resource []byte) error) error {
 	var serializedResources []serializedResource
 	if err := json.Unmarshal([]byte(str), &serializedResources); err != nil {
 		return fmt.Errorf("error deserializing resources: %w", err)
@@ -256,9 +247,9 @@ func unmarshal(data []byte, res Resource) error {
 		return fmt.Errorf("resource cannot be nil")
 	}
 
-	err := protojson.Unmarshal(data, res)
-	if err != nil {
+	if err := proto.Unmarshal(data, res); err != nil {
 		return fmt.Errorf("error deserializing resource: %w", err)
 	}
+	_ = proto.Size(res)
 	return nil
 }
