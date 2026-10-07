@@ -97,7 +97,6 @@ type Watcher struct {
 }
 
 type state struct {
-	path  string      // tracked path as asked by the user
 	info  os.FileInfo // stat info of the file, or the target if symlink
 	sum64 uint64      // checksum of the file, or the target if symlink
 }
@@ -112,8 +111,6 @@ func WithInterval(d time.Duration) Option {
 	}
 }
 
-// New creates a new Watcher which watches all trackedFile paths (they do not
-// need to exist yet).
 func New(defaultLogger *slog.Logger, trackedFiles []string, options ...Option) (*Watcher, error) {
 	interval := defaultInterval
 	if testing.Testing() {
@@ -136,7 +133,7 @@ func New(defaultLogger *slog.Logger, trackedFiles []string, options ...Option) (
 	// make a map of tracked files and assign them all empty state at the start
 	tracked := make(map[string]state, len(trackedFiles))
 	for _, f := range trackedFiles {
-		tracked[f] = state{path: f}
+		tracked[f] = state{}
 	}
 	w.tracked = tracked
 
@@ -171,14 +168,39 @@ func (w *Watcher) loop() {
 	}
 }
 
+var (
+	fnvPool = sync.Pool{
+		New: func() any {
+			return fnv.New64()
+		},
+	}
+	orderPool = sync.Pool{
+		New: func() any {
+			slice := make([]string, 0, 32)
+			return &slice
+		},
+	}
+)
+
+var readBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 4096)
+		return &b
+	},
+}
+
 func (w *Watcher) tick() {
 	// get all the paths that are currently known and are being tracked and visit
 	// them in order. It's done this way because the `w.tracked` map can be
 	// modified as new directories are discovered.
-	var order []string
+	orderPtr := orderPool.Get().(*[]string)
+	order := (*orderPtr)[:0]
 	for path := range w.tracked {
 		order = append(order, path)
 	}
+
+	bufPtr := readBufPool.Get().(*[]byte)
+	buf := *bufPtr
 
 	idx := -1 // start out of bounds because idx++ is done at the start of the loop
 	for {
@@ -196,7 +218,7 @@ func (w *Watcher) tick() {
 
 		var (
 			oldInfo  = oldState.info
-			newState = state{path: oldState.path}
+			newState = state{}
 		)
 
 		// os.Stat follows symlinks, os.Lstat doesn't
@@ -214,7 +236,7 @@ func (w *Watcher) tick() {
 				})
 
 				// clear out old state from the map
-				w.tracked[oldState.path] = newState
+				w.tracked[path] = newState
 			}
 
 			continue
@@ -243,7 +265,7 @@ func (w *Watcher) tick() {
 
 				// "schedule" this file to be checked at the end the order
 				order = append(order, fp)
-				w.tracked[fp] = state{path: fp}
+				w.tracked[fp] = state{}
 			}
 
 			// nothing else needs to be done for directory handling
@@ -258,14 +280,29 @@ func (w *Watcher) tick() {
 			continue
 		}
 
-		h := fnv.New64()
-		_, err = io.Copy(h, file)
+		h := fnvPool.Get().(hash64Resetter)
+		h.Reset()
+
+		for {
+			n, rerr := file.Read(buf)
+			if n > 0 {
+				_, _ = h.Write(buf[:n])
+			}
+			if rerr != nil {
+				if rerr != io.EOF {
+					err = rerr
+				}
+				break
+			}
+		}
 		_ = file.Close()
 		if err != nil {
+			fnvPool.Put(h)
 			w.sendError(err)
 			continue
 		}
 		newState.sum64 = h.Sum64()
+		fnvPool.Put(h)
 
 		if oldState.info == nil {
 			// haven't seen info for this track path before -- issue a creation
@@ -290,8 +327,21 @@ func (w *Watcher) tick() {
 				})
 			}
 		}
-		w.tracked[oldState.path] = newState
+		w.tracked[path] = newState
 	}
+
+	readBufPool.Put(bufPtr)
+
+	if cap(order) <= 4096 {
+		*orderPtr = order[:0]
+		orderPool.Put(orderPtr)
+	}
+}
+
+type hash64Resetter interface {
+	Reset()
+	Write(p []byte) (n int, err error)
+	Sum64() uint64
 }
 
 func (w *Watcher) sendEvent(e Event) {

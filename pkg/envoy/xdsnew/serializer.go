@@ -4,10 +4,12 @@
 package xdsnew
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sync"
 
 	cilium "github.com/cilium/proxy/go/cilium/api"
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -26,6 +28,12 @@ type Resource interface {
 	proto.Message
 }
 
+var marshalBufferPool = sync.Pool{
+	New: func() any {
+		return &bytes.Buffer{}
+	},
+}
+
 func marshal(res Resource) (string, error) {
 	opts := protojson.MarshalOptions{UseProtoNames: true, Indent: ""}
 	data, err := opts.Marshal(res)
@@ -33,14 +41,18 @@ func marshal(res Resource) (string, error) {
 		return "", err
 	}
 
-	// Since protojson.Marshal does not produce stable output,
-	// this is a workaround to produce stable json output.
-	// See https://github.com/golang/protobuf/issues/1082
-	data2, err := json.Marshal(json.RawMessage(data))
-	if err != nil {
+	buf := marshalBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	if err := json.Compact(buf, data); err != nil {
+		marshalBufferPool.Put(buf)
 		return "", err
 	}
-	return string(data2), nil
+
+	resStr := buf.String()
+	if buf.Cap() <= 4096 {
+		marshalBufferPool.Put(buf)
+	}
+	return resStr, nil
 }
 
 type serializedResource struct {
