@@ -8,12 +8,13 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"io"
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	envoy_config_core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_config_endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
@@ -245,15 +246,15 @@ func NewCache(logger *slog.Logger, strictAdsMode bool) Cache {
 }
 
 func (c *cacheImpl) hash(resources map[string]string) string {
+	keys := resourceKeys(resources)
+	slices.Sort(keys)
+
 	hasher := fnv.New32a()
-	printer := spew.ConfigState{
-		Indent:         " ",
-		SortKeys:       true,
-		DisableMethods: true,
-		SpewKeys:       true,
+	for _, k := range keys {
+		io.WriteString(hasher, k)
+		io.WriteString(hasher, resources[k])
 	}
-	printer.Fprintf(hasher, "%#v", resources)
-	return rand.SafeEncodeString(fmt.Sprint(hasher.Sum32()))
+	return rand.SafeEncodeString(strconv.FormatUint(uint64(hasher.Sum32()), 10))
 }
 
 func (c *cacheImpl) GetVersion(resources *xds.Resources) string {
@@ -290,12 +291,12 @@ func addResourceReference(refs map[string]map[string]struct{}, parent, resource 
 }
 
 func resourceReferencesVersionContext(refs map[string]map[string]struct{}) string {
-	parents := slices.Collect(maps.Keys(refs))
+	parents := resourceKeys(refs)
 	slices.Sort(parents)
 
 	var sb strings.Builder
 	for _, parent := range parents {
-		children := slices.Collect(maps.Keys(refs[parent]))
+		children := resourceKeys(refs[parent])
 		slices.Sort(children)
 		for _, child := range children {
 			sb.WriteString(parent)
@@ -464,27 +465,31 @@ func sdsReferenceVersionContext(resources *xds.Resources) string {
 }
 
 func (c *cacheImpl) resourceVersion(typeURL string, resources map[string]cache_types.Resource, versionContext ...string) (string, error) {
-	keys := slices.Collect(maps.Keys(resources))
+	keys := resourceKeys(resources)
 	slices.Sort(keys)
-	var sb strings.Builder
+
+	hasher := fnv.New32a()
+	io.WriteString(hasher, typeURL)
+
+	var buf []byte
 	for _, name := range keys {
-		encodedResource, err := marshal(resources[name])
+		var err error
+		buf, err = marshalAppend(buf[:0], resources[name])
 		if err != nil {
 			return "", err
 		}
-		sb.WriteString(name)
-		sb.WriteString(encodedResource)
+		io.WriteString(hasher, name)
+		hasher.Write(buf)
 	}
 	for _, context := range versionContext {
 		if context == "" {
 			continue
 		}
-		sb.WriteByte(0)
-		sb.WriteString("version-context")
-		sb.WriteByte(0)
-		sb.WriteString(context)
+		hasher.Write([]byte{0})
+		io.WriteString(hasher, "version-context\x00")
+		io.WriteString(hasher, context)
 	}
-	return c.hash(map[string]string{typeURL: sb.String()}), nil
+	return rand.SafeEncodeString(strconv.FormatUint(uint64(hasher.Sum32()), 10)), nil
 }
 
 // normalizeSnapshotResources returns the resource view used to build an ADS
