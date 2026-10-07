@@ -4,6 +4,7 @@
 package fswatcher
 
 import (
+	"hash"
 	"hash/fnv"
 	"io"
 	"log/slog"
@@ -97,7 +98,6 @@ type Watcher struct {
 }
 
 type state struct {
-	path  string      // tracked path as asked by the user
 	info  os.FileInfo // stat info of the file, or the target if symlink
 	sum64 uint64      // checksum of the file, or the target if symlink
 }
@@ -112,8 +112,6 @@ func WithInterval(d time.Duration) Option {
 	}
 }
 
-// New creates a new Watcher which watches all trackedFile paths (they do not
-// need to exist yet).
 func New(defaultLogger *slog.Logger, trackedFiles []string, options ...Option) (*Watcher, error) {
 	interval := defaultInterval
 	if testing.Testing() {
@@ -136,7 +134,7 @@ func New(defaultLogger *slog.Logger, trackedFiles []string, options ...Option) (
 	// make a map of tracked files and assign them all empty state at the start
 	tracked := make(map[string]state, len(trackedFiles))
 	for _, f := range trackedFiles {
-		tracked[f] = state{path: f}
+		tracked[f] = state{}
 	}
 	w.tracked = tracked
 
@@ -171,16 +169,48 @@ func (w *Watcher) loop() {
 	}
 }
 
+var (
+	bufPool = sync.Pool{
+		New: func() any {
+			b := make([]byte, 4096)
+			return &b
+		},
+	}
+	hashPool = sync.Pool{
+		New: func() any {
+			return fnv.New64()
+		},
+	}
+	orderPool = sync.Pool{
+		New: func() any {
+			s := make([]string, 0, 32)
+			return &s
+		},
+	}
+)
+
 func (w *Watcher) tick() {
-	// get all the paths that are currently known and are being tracked and visit
-	// them in order. It's done this way because the `w.tracked` map can be
-	// modified as new directories are discovered.
-	var order []string
+	orderPtr := orderPool.Get().(*[]string)
+	order := (*orderPtr)[:0]
+	defer func() {
+		if cap(order) <= 4096 {
+			*orderPtr = order[:0]
+			orderPool.Put(orderPtr)
+		}
+	}()
+
 	for path := range w.tracked {
 		order = append(order, path)
 	}
 
-	idx := -1 // start out of bounds because idx++ is done at the start of the loop
+	bufPtr := bufPool.Get().(*[]byte)
+	defer bufPool.Put(bufPtr)
+	buf := *bufPtr
+
+	h := hashPool.Get().(hash.Hash64)
+	defer hashPool.Put(h)
+
+	idx := -1
 	for {
 		idx++
 		if idx >= len(order) || idx < 0 {
@@ -190,44 +220,33 @@ func (w *Watcher) tick() {
 		path := order[idx]
 		oldState, ok := w.tracked[path]
 		if !ok {
-			// not sure how this can be possible, but better safe than sorry
 			continue
 		}
 
 		var (
 			oldInfo  = oldState.info
-			newState = state{path: oldState.path}
+			newState = state{}
 		)
 
-		// os.Stat follows symlinks, os.Lstat doesn't
 		info, err := os.Stat(path)
 		newState.info = info
 
 		if os.IsNotExist(err) {
-			// if the path does not exist, check if it existed before because if it
-			// did -- issue a deletion event
 			if oldState.info != nil {
-				// this file was deleted
 				w.sendEvent(Event{
 					Name: path,
 					Op:   Remove,
 				})
-
-				// clear out old state from the map
-				w.tracked[oldState.path] = newState
+				w.tracked[path] = newState
 			}
-
 			continue
 		}
 
-		// some other type of error encountered while doing os.Stat
 		if err != nil {
 			w.sendError(err)
 			continue
 		}
 
-		// when encountering a directory as a tracked path, list it's contents and
-		// track those, including a recursion into subdirectories.
 		if info.IsDir() {
 			de, err := os.ReadDir(path)
 			if err != nil {
@@ -237,52 +256,52 @@ func (w *Watcher) tick() {
 			for _, f := range de {
 				fp := filepath.Join(path, f.Name())
 				if _, ok := w.tracked[fp]; ok {
-					// this file is already being tracked, skip it
 					continue
 				}
 
-				// "schedule" this file to be checked at the end the order
 				order = append(order, fp)
-				w.tracked[fp] = state{path: fp}
+				w.tracked[fp] = state{}
 			}
-
-			// nothing else needs to be done for directory handling
 			continue
 		}
 
-		// compute the checksum of the file/symlink which is subsequently used to
-		// issue Write notifications
 		file, err := os.Open(path)
 		if err != nil {
 			w.sendError(err)
 			continue
 		}
 
-		h := fnv.New64()
-		_, err = io.Copy(h, file)
+		h.Reset()
+		var readErr error
+		for {
+			n, rErr := file.Read(buf)
+			if n > 0 {
+				_, _ = h.Write(buf[:n])
+			}
+			if rErr != nil {
+				if rErr != io.EOF {
+					readErr = rErr
+				}
+				break
+			}
+		}
 		_ = file.Close()
-		if err != nil {
-			w.sendError(err)
+		if readErr != nil {
+			w.sendError(readErr)
 			continue
 		}
 		newState.sum64 = h.Sum64()
 
 		if oldState.info == nil {
-			// haven't seen info for this track path before -- issue a creation
 			op := Create
-
-			// issue Create&Write if the file has data
 			if info.Size() > 0 {
 				op |= Write
 			}
-
-			// this is a new file
 			w.sendEvent(Event{
 				Name: path,
 				Op:   op,
 			})
 		} else {
-			// have seen this file/symlink before -- lets see if it changed size or contents
 			if info.Size() != oldInfo.Size() || newState.sum64 != oldState.sum64 {
 				w.sendEvent(Event{
 					Name: path,
@@ -290,7 +309,7 @@ func (w *Watcher) tick() {
 				})
 			}
 		}
-		w.tracked[oldState.path] = newState
+		w.tracked[path] = newState
 	}
 }
 
