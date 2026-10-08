@@ -74,7 +74,7 @@ func ParseSelectLabelArrayFromArray(base []string) LabelArray {
 
 // Labels returns the LabelArray as Labels
 func (ls LabelArray) Labels() Labels {
-	lbls := Labels{}
+	lbls := make(Labels, len(ls))
 	for i := range ls {
 		lbls[ls[i].Key] = ls[i]
 	}
