@@ -114,6 +114,24 @@ func compileCELFilters(exprs []string) ([]cel.Program, error) {
 	return programs, nil
 }
 
+// flowActivation is a cel.Activation that resolves the flow variable to the
+// flow being filtered. It avoids allocating a map[string]any activation for
+// every evaluated event.
+type flowActivation struct {
+	flow *flowpb.Flow
+}
+
+func (a flowActivation) ResolveName(name string) (any, bool) {
+	if name == flowVariableName {
+		return a.flow, true
+	}
+	return nil, false
+}
+
+func (a flowActivation) Parent() cel.Activation {
+	return nil
+}
+
 func filterByCELExpression(ctx context.Context, log *slog.Logger, exprs []string) (FilterFunc, error) {
 	programs, err := compileCELFilters(exprs)
 	if err != nil {
@@ -122,9 +140,7 @@ func filterByCELExpression(ctx context.Context, log *slog.Logger, exprs []string
 
 	return func(ev *v1.Event) bool {
 		for _, prg := range programs {
-			out, _, err := prg.ContextEval(ctx, map[string]any{
-				flowVariableName: ev.GetFlow(),
-			})
+			out, _, err := prg.ContextEval(ctx, flowActivation{flow: ev.GetFlow()})
 			if err != nil {
 				if celFilterLoggingLimiter.Allow() {
 					log.Error("Error running CEL program", logfields.Error, err)
