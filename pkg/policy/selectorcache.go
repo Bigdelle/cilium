@@ -646,7 +646,8 @@ func (sc *SelectorCache) removeSelectorLocked(selector CachedSelector, user Cach
 	sel, exists := sc.selectors.Get(key)
 	if exists && sel.removeUser(user, sc.localIdentityNotifier) {
 		sc.selectors.Delete(sel)
-		sel.updateSelections()
+		sc.writeableSelections.Delete(sel.id)
+		clear(sel.cachedSelections)
 		selectorCacheOperationDuration.WithLabelValues(types.LabelValueSCOperationRemoveSelector, types.LabelValueSCOperation, types.LabelValueSCTypePeer).Observe(time.Since(start).Seconds())
 	}
 }

@@ -735,3 +735,38 @@ func BenchmarkSelectorCacheIdentityUpdates(b *testing.B) {
 
 	}
 }
+
+func TestRemoveSelectorReleasesSelections(t *testing.T) {
+	sc := testNewSelectorCache(t, hivetest.Logger(t), nil)
+
+	wg := &sync.WaitGroup{}
+	sc.UpdateIdentities(identity.IdentityMap{
+		1234: labels.FromSlice(labels.NewLabel("app", "test", labels.LabelSourceK8s)),
+		2345: labels.FromSlice(labels.NewLabel("app", "test", labels.LabelSourceK8s), labels.NewLabel("tier", "web", labels.LabelSourceK8s)),
+	}, nil, wg)
+	wg.Wait()
+
+	user1 := newUser(t, "user1", sc)
+	user2 := newUser(t, "user2", sc)
+	removed := user1.AddIdentitySelector(api.NewESFromLabels(labels.NewLabel("app", "test", labels.LabelSourceK8s)))
+	kept := user2.AddIdentitySelector(api.NewESFromLabels(labels.NewLabel("tier", "web", labels.LabelSourceK8s)))
+	require.Equal(t, identity.NumericIdentitySlice{1234, 2345}, removed.GetSelections())
+	require.Equal(t, identity.NumericIdentitySlice{2345}, kept.GetSelections())
+
+	before := sc.GetSelectorSnapshot()
+	removedID := removed.(*identitySelector).id
+
+	user1.RemoveSelector(removed)
+
+	// The removed selector's selections are dropped from new snapshots...
+	after := sc.GetSelectorSnapshot()
+	require.Empty(t, after.Get(removedID))
+	require.Empty(t, removed.GetSelections())
+	// ...but remain visible in snapshots taken before the removal,
+	require.Equal(t, identity.NumericIdentitySlice{1234, 2345}, before.Get(removedID))
+	// and other selectors are not affected.
+	require.Equal(t, identity.NumericIdentitySlice{2345}, kept.GetSelections())
+
+	user2.RemoveSelector(kept)
+	require.True(t, sc.selectors.Empty())
+}
