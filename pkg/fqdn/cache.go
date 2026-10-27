@@ -221,7 +221,7 @@ func (c *DNSCache) Update(lookupTime time.Time, name string, ips []netip.Addr, t
 func (c *DNSCache) updateWithEntry(entry *cacheEntry) UpdateStatus {
 	entries, exists := c.forward[entry.Name]
 	if !exists {
-		entries = make(map[netip.Addr]*cacheEntry)
+		entries = make(map[netip.Addr]*cacheEntry, len(entry.IPs))
 		c.forward[entry.Name] = entries
 	}
 
@@ -244,11 +244,7 @@ func (c *DNSCache) addNameToCleanup(entry *cacheEntry) {
 		c.lastCleanup = entry.ExpirationTime
 	}
 	expiration := entry.ExpirationTime.Unix()
-	expiredEntries, exists := c.cleanup[expiration]
-	if !exists {
-		expiredEntries = []string{}
-	}
-	c.cleanup[expiration] = append(expiredEntries, entry.Name)
+	c.cleanup[expiration] = append(c.cleanup[expiration], entry.Name)
 }
 
 // cleanupExpiredEntries cleans all the expired entries since lastCleanup up to
@@ -573,12 +569,16 @@ func (c *DNSCache) updateWithEntryIPs(entries ipEntries, entry *cacheEntry) Upda
 		if old == nil || !exists || old.isExpiredBy(entry.ExpirationTime) {
 			entries[ip] = entry
 			c.upsertReverse(ip, entry)
-			c.addNameToCleanup(entry)
 			updated = true
 		}
 		if !exists {
 			upserted = true
 		}
+	}
+	// The cleanup list is keyed by name, so add the name once rather than
+	// once per updated IP.
+	if updated {
+		c.addNameToCleanup(entry)
 	}
 	return UpdateStatus{
 		Upserted: upserted,
