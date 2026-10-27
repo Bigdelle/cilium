@@ -220,8 +220,8 @@ func (ms *mapState) forID(k Key, idSet IDSet, f func(Key, mapStateEntry) bool) b
 //
 // All yielded keys will have either the specified ID or the aggregate ID.
 func (ms *mapState) CoveringBroaderOrEqualKeys(key Key) iter.Seq2[Key, mapStateEntry] {
-	agg := aggregateFor(key.Identity, ms.clusterInfo)
 	return func(yield func(Key, mapStateEntry) bool) {
+		agg := aggregateFor(key.Identity, ms.clusterInfo)
 		iter := ms.trie.AncestorIterator(key.PrefixLength(), key.LPMKey)
 		for ok, lpmKey, idSet := iter.Next(); ok; ok, lpmKey, idSet = iter.Next() {
 			k := Key{LPMKey: lpmKey}
@@ -249,8 +249,8 @@ func (ms *mapState) CoveringBroaderOrEqualKeys(key Key) iter.Seq2[Key, mapStateE
 // The difference is when the aggregate key is supplied - this yields *all* keys
 // with shorter-or-equal prefix length.
 func (ms *mapState) BroaderOrEqualKeys(key Key) iter.Seq2[Key, mapStateEntry] {
-	agg := aggregateFor(key.Identity, ms.clusterInfo)
 	return func(yield func(Key, mapStateEntry) bool) {
+		agg := aggregateFor(key.Identity, ms.clusterInfo)
 		iter := ms.trie.AncestorIterator(key.PrefixLength(), key.LPMKey)
 		for ok, lpmKey, idSet := iter.Next(); ok; ok, lpmKey, idSet = iter.Next() {
 			k := Key{LPMKey: lpmKey}
@@ -284,8 +284,8 @@ func (ms *mapState) BroaderOrEqualKeys(key Key) iter.Seq2[Key, mapStateEntry] {
 // If a non-aggregate key is supplied, all keys yielded will have that identity.
 // If an aggregate key is supplied, all longer-prefix keys will be yielded.
 func (ms *mapState) CoveredNarrowerOrEqualKeys(key Key) iter.Seq2[Key, mapStateEntry] {
-	agg := aggregateFor(key.Identity, ms.clusterInfo)
 	return func(yield func(Key, mapStateEntry) bool) {
+		agg := aggregateFor(key.Identity, ms.clusterInfo)
 		iter := ms.trie.DescendantIterator(key.PrefixLength(), key.LPMKey)
 		for ok, lpmKey, idSet := iter.Next(); ok; ok, lpmKey, idSet = iter.Next() {
 			k := Key{LPMKey: lpmKey}
@@ -318,8 +318,8 @@ func (ms *mapState) CoveredNarrowerOrEqualKeys(key Key) iter.Seq2[Key, mapStateE
 //
 // If a aggregate key is supplied, this will yield all longer-prefix keys.
 func (ms *mapState) NarrowerOrEqualKeys(key Key) iter.Seq2[Key, mapStateEntry] {
-	wc := aggregateFor(key.Identity, ms.clusterInfo)
 	return func(yield func(Key, mapStateEntry) bool) {
+		wc := aggregateFor(key.Identity, ms.clusterInfo)
 		iter := ms.trie.DescendantIterator(key.PrefixLength(), key.LPMKey)
 		for ok, lpmKey, idSet := iter.Next(); ok; ok, lpmKey, idSet = iter.Next() {
 			k := Key{LPMKey: lpmKey}

@@ -3306,3 +3306,51 @@ func TestNewMapStatePreallocation(t *testing.T) {
 	require.Len(t, ms.byId[identity.NumericIdentity(1000)], 1)
 	require.Empty(t, ms.byId[identity.NumericIdentity(1001)])
 }
+
+// TestMapState_keyIteratorsDoNotAllocate guards against heap allocations when
+// ranging over the mapState key iterators. They are used on the policy map
+// state update path (e.g. insertWithChanges), and the iterator closures only
+// stay on the stack as long as the iterator constructors can be inlined. The
+// iterators must not allocate more than the underlying trie iterators do.
+func TestMapState_keyIteratorsDoNotAllocate(t *testing.T) {
+	id := identity.NumericIdentity(1001)
+	agg := aggregateFor(id, emptyMapState(hivetest.Logger(t)).clusterInfo)
+
+	ms := testMapState(t, mapStateMap{
+		egressKey(id, 0, 0, 0):   allowEntry(),
+		egressKey(id, 6, 0, 0):   allowEntry(),
+		egressKey(id, 6, 80, 16): denyEntry(),
+		egressKey(agg, 6, 0, 0):  allowEntry(),
+		egressKey(agg, 6, 80, 0): denyEntry(),
+	})
+
+	for _, key := range []Key{egressKey(id, 6, 80, 16), egressKey(agg, 6, 0, 0)} {
+		ancestorAllocs := testing.AllocsPerRun(100, func() {
+			it := ms.trie.AncestorIterator(key.PrefixLength(), key.LPMKey)
+			for ok, _, _ := it.Next(); ok; ok, _, _ = it.Next() {
+			}
+		})
+		descendantAllocs := testing.AllocsPerRun(100, func() {
+			it := ms.trie.DescendantIterator(key.PrefixLength(), key.LPMKey)
+			for ok, _, _ := it.Next(); ok; ok, _, _ = it.Next() {
+			}
+		})
+
+		require.Equal(t, ancestorAllocs, testing.AllocsPerRun(100, func() {
+			for range ms.CoveringBroaderOrEqualKeys(key) {
+			}
+		}), "CoveringBroaderOrEqualKeys(%v)", key)
+		require.Equal(t, ancestorAllocs, testing.AllocsPerRun(100, func() {
+			for range ms.BroaderOrEqualKeys(key) {
+			}
+		}), "BroaderOrEqualKeys(%v)", key)
+		require.Equal(t, descendantAllocs, testing.AllocsPerRun(100, func() {
+			for range ms.CoveredNarrowerOrEqualKeys(key) {
+			}
+		}), "CoveredNarrowerOrEqualKeys(%v)", key)
+		require.Equal(t, descendantAllocs, testing.AllocsPerRun(100, func() {
+			for range ms.NarrowerOrEqualKeys(key) {
+			}
+		}), "NarrowerOrEqualKeys(%v)", key)
+	}
+}
