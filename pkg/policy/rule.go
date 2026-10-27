@@ -29,6 +29,11 @@ type rule struct {
 
 	// subjectSelector is the entry in the SelectorCache that selects subjects (endpoints or nodes).
 	subjectSelector CachedSelector
+
+	// cachedOrigin is the rule origin derived from the immutable Labels and
+	// Log of the PolicyEntry. It is computed once when the rule is created, as
+	// origin() is called for every rule on each policy resolution.
+	cachedOrigin ruleOrigin
 }
 
 // IdentitySelectionUpdated is called by the SelectorCache when a new identity is added;
@@ -58,8 +63,18 @@ func (r *rule) String() string {
 	return r.Subject.Key()
 }
 
+// ruleOriginFor returns the rule origin for the given policy entry.
+func ruleOriginFor(entry *types.PolicyEntry) ruleOrigin {
+	return makeSingleRuleOrigin(entry.Labels.Sort(), entry.Log.Value)
+}
+
 func (r *rule) origin() ruleOrigin {
-	return makeSingleRuleOrigin(r.Labels.Sort(), r.Log.Value)
+	// Rules constructed without newRule() or addDefaultRule() (e.g. in tests)
+	// have no cached origin.
+	if r.cachedOrigin == (ruleOrigin{}) {
+		return ruleOriginFor(&r.PolicyEntry)
+	}
+	return r.cachedOrigin
 }
 
 func (epd *PerSelectorPolicy) appendL7WildcardRule(policyContext PolicyContext) api.L7Rules {

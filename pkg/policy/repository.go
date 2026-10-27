@@ -252,6 +252,7 @@ func (p *Repository) newRule(policyEntry types.PolicyEntry, key ruleKey) *rule {
 		PolicyEntry: policyEntry,
 		key:         key,
 	}
+	r.cachedOrigin = ruleOriginFor(&r.PolicyEntry)
 	css, _ := p.subjectSelectorCache.AddSelectors(r, r.Subject)
 	r.subjectSelector = css[0]
 	return r
@@ -545,7 +546,7 @@ func (rules ruleSlice) addDefaultRule(subject *identity.Identity, peers types.Se
 	}
 	ingress := lastRule.Ingress
 
-	return append(rules, &rule{
+	r := &rule{
 		PolicyEntry: types.PolicyEntry{
 			Tier:     types.DefaultPolicy,
 			Priority: priority,
@@ -555,7 +556,9 @@ func (rules ruleSlice) addDefaultRule(subject *identity.Identity, peers types.Se
 			L3:       peers,
 			Labels:   lbls,
 		},
-	})
+	}
+	r.cachedOrigin = ruleOriginFor(&r.PolicyEntry)
+	return append(rules, r)
 }
 
 // ComputeSelectorPolicy resolves the SelectorPolicy for the given identity at

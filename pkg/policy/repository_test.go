@@ -1534,3 +1534,32 @@ func TestRepositorySnapshot(t *testing.T) {
 
 	assert.Equal(t, beforeRules, orig.GetRulesList().Policy)
 }
+
+func TestRuleOriginIsComputedOnce(t *testing.T) {
+	repo := NewPolicyRepository(hivetest.Logger(t), cmtypes.DefaultClusterInfo, nil, nil, nil, nil, testpolicy.NewPolicyMetricsNoop())
+
+	epSelector := types.NewLabelSelectorFromLabels(labels.NewLabel("app", "foo", labels.LabelSourceK8s))
+	ruleLabels := labels.LabelArray{
+		labels.NewLabel("name", "rule", labels.LabelSourceK8s),
+		labels.NewLabel("namespace", "ns", labels.LabelSourceK8s),
+	}
+	rules, _ := repo.MustAddPolicyEntries(policytypes.PolicyEntries{{
+		Verdict: types.Allow,
+		Subject: epSelector,
+		Labels:  labels.LabelArray{ruleLabels[1], ruleLabels[0]}, // unsorted
+		Log:     api.LogConfig{Value: "log"},
+		L3:      types.Selectors{epSelector},
+	}})
+	require.Len(t, rules, 1)
+	r := rules[0]
+
+	require.Equal(t, makeSingleRuleOrigin(ruleLabels, "log"), r.origin())
+	require.Zero(t, testing.AllocsPerRun(100, func() { _ = r.origin() }))
+
+	// Default rules get their origin computed when they are created, too.
+	subject := identity.NewIdentity(identity.NumericIdentity(1000), labels.Labels{"app": labels.NewLabel("app", "foo", labels.LabelSourceK8s)})
+	rules = rules.addDefaultRule(subject, types.WildcardSelectors, LabelsAllowAnyIngress, types.Allow)
+	require.Len(t, rules, 2)
+	require.Equal(t, makeSingleRuleOrigin(LabelsAllowAnyIngress, ""), rules[1].origin())
+	require.Zero(t, testing.AllocsPerRun(100, func() { _ = rules[1].origin() }))
+}
