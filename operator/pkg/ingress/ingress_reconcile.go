@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -462,7 +463,11 @@ func (r *ingressReconciler) updateIngressLoadbalancerStatus(ctx context.Context,
 		return nil
 	}
 
-	ingress.Status.LoadBalancer.Ingress = convertToNetworkV1IngressLoadBalancerIngress(loadbalancerService.Status.LoadBalancer.Ingress)
+	newLB := convertToNetworkV1IngressLoadBalancerIngress(loadbalancerService.Status.LoadBalancer.Ingress)
+	if equality.Semantic.DeepEqual(ingress.Status.LoadBalancer.Ingress, newLB) {
+		return nil
+	}
+	ingress.Status.LoadBalancer.Ingress = newLB
 
 	if err := r.client.Status().Update(ctx, ingress); err != nil {
 		return fmt.Errorf("failed to write Ingress status: %w", err)
