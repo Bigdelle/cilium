@@ -86,7 +86,14 @@ func getZstdEncoder() (*zstd.Encoder, error) {
 		return encoder.(*zstd.Encoder), nil
 	}
 
-	return zstd.NewWriter(nil)
+	// Each zstd.Encoder eagerly allocates `concurrency` internal block
+	// encoders, each carrying ~1.25 MiB of match tables at the default
+	// compression level. The default concurrency is GOMAXPROCS, but
+	// EncodeAll only ever uses one of them per call and the sync.Pool above
+	// already provides one encoder per concurrent caller, so anything above 1
+	// is wasted memory that is re-allocated every time the pool is drained
+	// by the GC.
+	return zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
 }
 
 func getZstdDecoder() (*zstd.Decoder, error) {
@@ -94,7 +101,10 @@ func getZstdDecoder() (*zstd.Decoder, error) {
 		return decoder.(*zstd.Decoder), nil
 	}
 
-	return zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxDecodeSize))
+	// Same reasoning as for the encoder: DecodeAll is synchronous and the
+	// pool provides per-caller decoders, so additional internal block
+	// decoders are never used.
+	return zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxDecodeSize), zstd.WithDecoderConcurrency(1))
 }
 
 // Marshal returns the cluster EndpointSlice object as zstd-compressed protobuf
